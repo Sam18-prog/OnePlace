@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened global primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Validation blueprint for Event documents
+    function isValidEvent(data) {
+      return data.keys().hasAll(['title', 'hostClub', 'dateTime', 'location', 'description', 'rsvpCount'])
+        && data.keys().hasOnly(['title', 'hostClub', 'dateTime', 'location', 'description', 'rsvpCount'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.hostClub is string && data.hostClub.size() >= 1 && data.hostClub.size() <= 80
+        && data.dateTime is timestamp
+        && data.location is string && data.location.size() >= 1 && data.location.size() <= 120
+        && data.description is string && data.description.size() <= 600
+        && data.rsvpCount is int && data.rsvpCount >= 0 && data.rsvpCount <= 100000;
+    }
+
+    // Validation blueprint for Attendee documents
+    function isValidAttendee(data, attendeeId) {
+      return data.keys().hasAll(['uid', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'createdAt'])
+        && data.uid is string
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.uid == attendeeId
+        && data.createdAt is timestamp
+        && data.createdAt == request.time;
+    }
+
+    // Events collection
+    match /events/{eventId} {
+      allow get: if isSignedIn() && isValidId(eventId);
+      allow list: if isSignedIn()
+        && resource.data.title is string
+        && resource.data.rsvpCount is int
+        && resource.data.rsvpCount >= 0;
+
+      // Initial seed creation from static demo-events.json by verified signed-in users
+      allow create: if isVerifiedUser()
+        && isValidId(eventId)
+        && isValidEvent(incoming())
+        && incoming().rsvpCount >= 0
+        && incoming().rsvpCount <= 1000;
+
+      // Action-based update: ONLY atomic RSVP increment (+1) or cancel decrement (-1)
+      allow update: if isVerifiedUser()
+        && isValidId(eventId)
+        && isValidEvent(incoming())
+        && incoming().title == existing().title
+        && incoming().hostClub == existing().hostClub
+        && incoming().dateTime == existing().dateTime
+        && incoming().location == existing().location
+        && incoming().description == existing().description
+        && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpCount'])
+        && (
+          // Action: RSVP (+1 paired atomically with creating own attendee record)
+          (
+            incoming().rsvpCount == existing().rsvpCount + 1
+            && !exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+          )
+          ||
+          // Action: Cancel RSVP (-1 paired atomically with deleting own attendee record)
+          (
+            incoming().rsvpCount == existing().rsvpCount - 1
+            && existing().rsvpCount >= 1
+            && exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+            && !existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+          )
+        );
+
+      allow delete: if false;
+
+      // Attendees subcollection (keyed by student UID)
+      match /attendees/{attendeeId} {
+        allow get: if isSignedIn()
+          && isValidId(eventId)
+          && isValidId(attendeeId)
+          && isOwner(attendeeId)
+          && exists(/databases/$(database)/documents/events/$(eventId));
+
+        // Deny listing all attendees to prevent student enumeration
+        allow list: if false;
+
+        // Action: Create own RSVP record atomically with parent rsvpCount + 1
+        allow create: if isVerifiedUser()
+          && isValidId(eventId)
+          && isValidId(attendeeId)
+          && isOwner(attendeeId)
+          && isValidAttendee(incoming(), attendeeId)
+          && exists(/databases/$(database)/documents/events/$(eventId))
+          && getAfter(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount
+            == get(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount + 1;
+
+        allow update: if false;
+
+        // Action: Delete own RSVP record atomically with parent rsvpCount - 1
+        allow delete: if isVerifiedUser()
+          && isValidId(eventId)
+          && isValidId(attendeeId)
+          && isOwner(attendeeId)
+          && exists(/databases/$(database)/documents/events/$(eventId))
+          && getAfter(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount
+            == get(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount - 1;
+      }
+    }
+  }
+}

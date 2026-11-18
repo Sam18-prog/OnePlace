@@ -1,0 +1,87 @@
+{
+  "entities": {
+    "Event": {
+      "title": "Event",
+      "description": "A school club meeting or campus event displayed in the OnePlace unified feed.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Display title of the school event.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "hostClub": {
+          "type": "string",
+          "description": "Name of the student organization or club hosting the event.",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "dateTime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Scheduled start date and time stored as a Firestore Timestamp."
+        },
+        "location": {
+          "type": "string",
+          "description": "Campus room, building, or field where the event takes place.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief summary of the event details.",
+          "maxLength": 600
+        },
+        "rsvpCount": {
+          "type": "integer",
+          "description": "Total number of students who have RSVPed to the event."
+        }
+      },
+      "required": [
+        "title",
+        "hostClub",
+        "dateTime",
+        "location",
+        "description",
+        "rsvpCount"
+      ]
+    },
+    "Attendee": {
+      "title": "Attendee",
+      "description": "An RSVP record linking a signed-in student UID to an event.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the attending student.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the student RSVPed."
+        }
+      },
+      "required": [
+        "uid",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/events/{eventId}": {
+      "schema": {
+        "$ref": "#/entities/Event"
+      },
+      "description": "Collection of high school events synchronized from demo-events.json with live RSVP counts."
+    },
+    "/events/{eventId}/attendees/{attendeeId}": {
+      "schema": {
+        "$ref": "#/entities/Attendee"
+      },
+      "description": "Subcollection tracking individual student RSVPs keyed by their Firebase Auth UID."
+    }
+  }
+}

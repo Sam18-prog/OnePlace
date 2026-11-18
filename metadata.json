@@ -1,0 +1,6 @@
+{
+  "name": "OnePlace",
+  "description": "A unified chronological feed of high school club meetings, athletics, and campus events with Google Sign-In RSVPs and calendar export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

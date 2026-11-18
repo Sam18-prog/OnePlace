@@ -1,0 +1,56 @@
+[
+  {
+    "id": "evt-robotics-build",
+    "title": "Robotics Club Build Night",
+    "hostClub": "FRC Team 4210 · Robotics Club",
+    "dateTime": "2026-11-17T15:30:00",
+    "location": "Engineering Lab 104",
+    "description": "Drivetrain assembly, sensor wiring, and autonomous path testing ahead of Saturday's scrimmage. Tools and snacks provided.",
+    "rsvpCount": 14
+  },
+  {
+    "id": "evt-student-council",
+    "title": "Student Council Open Forum",
+    "hostClub": "Associated Student Body",
+    "dateTime": "2026-11-17T16:15:00",
+    "location": "Student Union Commons",
+    "description": "Vote on winter spirit week themes, review club funding requests, and share feedback on cafeteria menu updates.",
+    "rsvpCount": 9
+  },
+  {
+    "id": "evt-varsity-hoops",
+    "title": "Varsity Basketball Home Opener",
+    "hostClub": "Oakridge Athletics",
+    "dateTime": "2026-11-19T18:30:00",
+    "location": "Main Gymnasium",
+    "description": "Tip-off against Northside Prep. Free student section admission with school ID and halftime three-point shootout.",
+    "rsvpCount": 42
+  },
+  {
+    "id": "evt-debate-trial",
+    "title": "Model UN & Debate Mock Session",
+    "hostClub": "Speech & Debate Society",
+    "dateTime": "2026-11-20T15:15:00",
+    "location": "Humanities Room 218",
+    "description": "Practice opening speeches and rebuttal drills for next month's regional invitational. Beginners welcome.",
+    "rsvpCount": 11
+  },
+  {
+    "id": "evt-jazz-coffeehouse",
+    "title": "Fall Acoustic & Jazz Coffeehouse",
+    "hostClub": "Student Music Collective",
+    "dateTime": "2026-11-25T17:00:00",
+    "location": "Black Box Theater",
+    "description": "Student soloists, indie duos, and the jazz combo performing live sets with hot cider and pastries.",
+    "rsvpCount": 27
+  },
+  {
+    "id": "evt-winter-hackathon",
+    "title": "Winter Hackathon Team Mixer",
+    "hostClub": "CS & Makers Club",
+    "dateTime": "2026-12-03T15:30:00",
+    "location": "Media Center 202",
+    "description": "Pitch project ideas, find teammates across coding and design, and get workshop starter kits.",
+    "rsvpCount": 18
+  }
+]
