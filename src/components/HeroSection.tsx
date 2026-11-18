@@ -1,10 +1,17 @@
-import { ArrowRight, CalendarDays, Search, X } from 'lucide-react';
-import type { SchoolEvent } from '../types/event';
+import { useState } from 'react';
+import { ArrowRight, CalendarDays, Search, SlidersHorizontal, X } from 'lucide-react';
+import type { EventCategory, SchoolEvent } from '../types/event';
 import { EVENT_CATEGORIES, getCategoryCounts } from '../utils/events';
+import { getTimeOfDayGreeting } from '../utils/personalization';
 import type { CategoryFilter } from './DiscoveryToolbar';
+import { InterestSelector } from './personalization/InterestSelector';
 
 interface HeroSectionProps {
   events: SchoolEvent[];
+  displayName?: string | null;
+  isSignedIn?: boolean;
+  selectedInterests?: EventCategory[];
+  onToggleInterest?: (category: EventCategory) => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   categoryFilter: CategoryFilter;
@@ -14,27 +21,33 @@ interface HeroSectionProps {
 
 export function HeroSection({
   events,
+  displayName,
+  isSignedIn = false,
+  selectedInterests = [],
+  onToggleInterest,
   searchQuery,
   onSearchChange,
   categoryFilter,
   onSelectCategoryShortcut,
   onExploreCta,
 }: HeroSectionProps) {
+  const [showInterests, setShowInterests] = useState(false);
   const categoryCounts = getCategoryCounts(events);
+  const greeting = getTimeOfDayGreeting(new Date(), displayName);
 
   return (
     <section className="rounded-2xl border border-[#E5E7EB] bg-white p-5 sm:p-7 md:p-8 shadow-xs">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
         <div className="max-w-2xl">
           <p className="font-mono text-xs font-medium text-[#E85D04]">
-            OnePlace Campus Feed
+            {greeting} · OnePlace Campus Feed
           </p>
 
           <h1 className="mt-2 font-display text-3xl sm:text-4xl md:text-[42px] font-extrabold tracking-tight text-[#171717] leading-[1.1] [text-wrap:balance]">
             Your campus is happening.
           </h1>
           <p className="mt-2.5 text-sm sm:text-base text-[#737373] leading-relaxed max-w-xl">
-            Find your people. Discover what matters. Be where it happens.
+            Discover what matters. Stay connected to clubs you care about, and never miss an event.
           </p>
         </div>
 
@@ -47,6 +60,24 @@ export function HeroSection({
             <span>events scheduled</span>
           </div>
 
+          {isSignedIn && onToggleInterest && (
+            <button
+              type="button"
+              onClick={() => setShowInterests((prev) => !prev)}
+              aria-expanded={showInterests}
+              className={`inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                showInterests || selectedInterests.length > 0
+                  ? 'border-[#E85D04]/30 bg-[#E85D04]/10 text-[#DC2F02]'
+                  : 'border-[#E5E7EB] bg-white text-[#171717] hover:bg-[#F8F9FA]'
+              }`}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>
+                Interests{selectedInterests.length > 0 ? ` (${selectedInterests.length})` : ''}
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onExploreCta}
@@ -57,6 +88,17 @@ export function HeroSection({
           </button>
         </div>
       </div>
+
+      {isSignedIn && onToggleInterest && showInterests && (
+        <div className="mt-5 rounded-xl border border-[#E5E7EB] bg-[#F8F9FA] p-4">
+          <InterestSelector
+            selectedInterests={selectedInterests}
+            onToggleInterest={onToggleInterest}
+            compact
+            subtitle="Choose optional topics to personalize Recommended for You below."
+          />
+        </div>
+      )}
 
       {/* Prominent Hero Discovery Search & Category Shortcuts */}
       <div className="mt-6 pt-5 border-t border-[#E5E7EB] flex flex-col gap-3">

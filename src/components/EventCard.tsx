@@ -15,6 +15,7 @@ interface EventCardProps {
   isSignedIn: boolean;
   onRsvpClick: (event: SchoolEvent) => void;
   onSelectEvent: (event: SchoolEvent) => void;
+  onSelectClubById?: (clubId: string) => void;
 }
 
 export function EventCard({
@@ -26,6 +27,7 @@ export function EventCard({
   isSignedIn,
   onRsvpClick,
   onSelectEvent,
+  onSelectClubById,
 }: EventCardProps) {
   const formattedDateTime = formatEventDateTime(event.startAt, new Date(), event.timezone);
   const googleCalendarUrl = buildGoogleCalendarUrl(event);
@@ -115,9 +117,22 @@ export function EventCard({
                     <span>School only</span>
                   </span>
                 )}
-                <span className="text-xs font-medium text-[#737373] truncate">
-                  {event.hostClub}
-                </span>
+                {onSelectClubById ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectClubById(event.clubId);
+                    }}
+                    className="text-xs font-medium text-[#737373] hover:text-[#E85D04] hover:underline truncate cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
+                  >
+                    {event.hostClub}
+                  </button>
+                ) : (
+                  <span className="text-xs font-medium text-[#737373] truncate">
+                    {event.hostClub}
+                  </span>
+                )}
               </div>
               {isFeatured && !isCancelled && (
                 <span className="font-mono text-[11px] font-medium text-[#E85D04] whitespace-nowrap">

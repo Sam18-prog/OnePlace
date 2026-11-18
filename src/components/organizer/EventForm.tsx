@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { AlertCircle, Globe, Lock, Save, Send, X } from 'lucide-react';
+import type { Club } from '../../types/club';
 import type { EventFormValues, EventVisibility, SchoolEvent } from '../../types/event';
+import { mapClubCategoryToEventCategory } from '../../utils/clubValidation';
 import {
   ALL_EVENT_CATEGORIES,
-  EVENT_CLUB_MAX,
   EVENT_DESC_MAX,
   EVENT_IMAGE_URL_MAX,
   EVENT_LOCATION_MAX,
@@ -20,19 +21,26 @@ interface EventFormProps {
   mode: 'create' | 'edit';
   initialEvent: SchoolEvent | null;
   schoolTimezone: string;
+  authorizedClubs: Club[];
+  allSchoolClubs?: Club[];
   isSubmitting: boolean;
   submitError: string | null;
   onSubmit: (values: EventFormValues, targetStatus: 'draft' | 'published') => Promise<void>;
   onClose: () => void;
 }
 
-function getInitialValues(event: SchoolEvent | null, schoolTimezone: string): EventFormValues {
+function getInitialValues(
+  event: SchoolEvent | null,
+  schoolTimezone: string,
+  authorizedClubs: Club[]
+): EventFormValues {
   if (event) {
     const startParts = formatDateInTimezone(event.startAt, event.timezone || schoolTimezone);
     const endParts = formatDateInTimezone(event.endAt, event.timezone || schoolTimezone);
     return {
       title: event.title,
       hostClub: event.hostClub,
+      clubId: event.clubId,
       category: event.category,
       eventDate: startParts.date,
       startTime: startParts.time,
@@ -44,12 +52,14 @@ function getInitialValues(event: SchoolEvent | null, schoolTimezone: string): Ev
     };
   }
 
+  const defaultClub = authorizedClubs[0];
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const dateParts = formatDateInTimezone(tomorrow, schoolTimezone);
   return {
     title: '',
-    hostClub: '',
-    category: 'STEM & Makers',
+    hostClub: defaultClub?.name ?? '',
+    clubId: defaultClub?.id ?? '',
+    category: defaultClub ? mapClubCategoryToEventCategory(defaultClub.category) : 'STEM & Makers',
     eventDate: dateParts.date,
     startTime: '15:30',
     endTime: '16:30',
@@ -65,13 +75,15 @@ export function EventForm({
   mode,
   initialEvent,
   schoolTimezone,
+  authorizedClubs,
+  allSchoolClubs = [],
   isSubmitting,
   submitError,
   onSubmit,
   onClose,
 }: EventFormProps) {
   const [values, setValues] = useState<EventFormValues>(() =>
-    getInitialValues(initialEvent, schoolTimezone)
+    getInitialValues(initialEvent, schoolTimezone, authorizedClubs)
   );
   const [errors, setErrors] = useState<EventFormErrors>({});
 
@@ -80,9 +92,9 @@ export function EventForm({
 
   useEffect(() => {
     if (!isOpen) return;
-    setValues(getInitialValues(initialEvent, schoolTimezone));
+    setValues(getInitialValues(initialEvent, schoolTimezone, authorizedClubs));
     setErrors({});
-  }, [isOpen, initialEvent, schoolTimezone]);
+  }, [isOpen, initialEvent, schoolTimezone, authorizedClubs]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -109,6 +121,15 @@ export function EventForm({
 
   if (!isOpen) return null;
 
+  const selectedActiveClub = authorizedClubs.find((c) => c.id === values.clubId);
+  const isSelectedClubSuspended = Boolean(
+    values.clubId &&
+      !selectedActiveClub &&
+      allSchoolClubs.some((c) => c.id === values.clubId && c.status === 'suspended')
+  );
+  const hasNoAuthorizedClubs = authorizedClubs.length === 0;
+  const publishBlockedByClub = !selectedActiveClub || isSelectedClubSuspended;
+
   const updateField = <K extends keyof EventFormValues>(key: K, value: EventFormValues[K]) => {
     setValues((prev) => ({ ...prev, [key]: value }));
     if (errors[key as keyof EventFormErrors]) {
@@ -120,12 +141,43 @@ export function EventForm({
     }
   };
 
+  const handleClubSelect = (nextClubId: string) => {
+    const matched = authorizedClubs.find((c) => c.id === nextClubId);
+    if (!matched) return;
+    setValues((prev) => ({
+      ...prev,
+      clubId: matched.id,
+      hostClub: matched.name,
+      category:
+        mode === 'create'
+          ? mapClubCategoryToEventCategory(matched.category)
+          : prev.category,
+    }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.clubId;
+      delete next.hostClub;
+      return next;
+    });
+  };
+
   const handleAction = async (targetStatus: 'draft' | 'published') => {
+    if (targetStatus === 'published' && publishBlockedByClub) {
+      setErrors((prev) => ({
+        ...prev,
+        clubId: isSelectedClubSuspended
+          ? 'Suspended clubs cannot publish events until reactivated.'
+          : 'Select an active hosting club.',
+      }));
+      return;
+    }
+
     const isEditingExistingPublished =
       mode === 'edit' && initialEvent?.status === 'published' && targetStatus === 'published';
 
     const validation = validateEventForm(values, targetStatus, schoolTimezone, {
       isEditingExistingPublished,
+      requireClubId: true,
     });
     if (!validation.valid) {
       setErrors(validation.errors);
@@ -218,27 +270,62 @@ export function EventForm({
             {errors.title && <p className="mt-1 text-xs text-[#DC2626]">{errors.title}</p>}
           </div>
 
+          {hasNoAuthorizedClubs && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900"
+            >
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+              <span>
+                No active clubs are currently available for your account. Create or reactivate a club (or ask an admin to assign you as a club organizer) before publishing events.
+              </span>
+            </div>
+          )}
+
+          {isSelectedClubSuspended && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700"
+            >
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+              <span>
+                This club is currently suspended. Publishing new or updated events is blocked until a school administrator reactivates the club.
+              </span>
+            </div>
+          )}
+
           {/* Hosting Club & Category */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="evt-club" className="text-xs font-semibold text-[#171717]">
-                  Hosting club <span className="text-[#DC2626]">*</span>
-                </label>
-                <span className="font-mono text-[11px] text-[#737373]">
-                  {values.hostClub.length}/{EVENT_CLUB_MAX}
-                </span>
-              </div>
-              <input
+              <label htmlFor="evt-club" className="block text-xs font-semibold text-[#171717] mb-1.5">
+                Hosting club <span className="text-[#DC2626]">*</span>
+              </label>
+              <select
                 id="evt-club"
-                type="text"
-                maxLength={EVENT_CLUB_MAX}
-                value={values.hostClub}
-                onChange={(e) => updateField('hostClub', e.target.value)}
-                placeholder="e.g., Robotics & Makers Club"
-                className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] placeholder:text-[#737373] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
-              />
-              {errors.hostClub && <p className="mt-1 text-xs text-[#DC2626]">{errors.hostClub}</p>}
+                value={values.clubId || ''}
+                onChange={(e) => handleClubSelect(e.target.value)}
+                disabled={hasNoAuthorizedClubs && !values.clubId}
+                className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15 disabled:bg-[#F8F9FA] disabled:text-[#737373]"
+              >
+                {authorizedClubs.length === 0 && !values.clubId && (
+                  <option value="">No active clubs available</option>
+                )}
+                {values.clubId && !selectedActiveClub && (
+                  <option value={values.clubId}>
+                    {values.hostClub || values.clubId} (Inactive / Unassigned)
+                  </option>
+                )}
+                {authorizedClubs.map((club) => (
+                  <option key={club.id} value={club.id}>
+                    {club.name}
+                  </option>
+                ))}
+              </select>
+              {(errors.clubId || errors.hostClub) && (
+                <p className="mt-1 text-xs text-[#DC2626]">
+                  {errors.clubId || errors.hostClub}
+                </p>
+              )}
             </div>
 
             <div>
@@ -454,7 +541,7 @@ export function EventForm({
             {!isPublishedEdit && (
               <button
                 type="button"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !selectedActiveClub}
                 onClick={() => void handleAction('draft')}
                 className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-4 py-2 text-xs sm:text-sm font-semibold text-[#171717] hover:bg-[#F3F4F6] disabled:opacity-50 cursor-pointer"
               >
@@ -465,7 +552,7 @@ export function EventForm({
 
             <button
               type="button"
-              disabled={isSubmitting}
+              disabled={isSubmitting || publishBlockedByClub}
               onClick={() => void handleAction('published')}
               className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[#E85D04] px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-[#DC2F02] disabled:opacity-60 cursor-pointer"
             >

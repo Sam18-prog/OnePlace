@@ -24,6 +24,7 @@ export const ALL_EVENT_CATEGORIES: EventCategory[] = [
 export interface EventFormErrors {
   title?: string;
   hostClub?: string;
+  clubId?: string;
   category?: string;
   eventDate?: string;
   startTime?: string;
@@ -203,6 +204,7 @@ export function validateEventForm(
   options: {
     now?: Date;
     isEditingExistingPublished?: boolean;
+    requireClubId?: boolean;
   } = {}
 ): EventValidationResult {
   const now = options.now ?? new Date();
@@ -220,6 +222,13 @@ export function validateEventForm(
     errors.hostClub = `Hosting club must be at least ${EVENT_CLUB_MIN} characters.`;
   } else if (hostClub.length > EVENT_CLUB_MAX) {
     errors.hostClub = `Hosting club must be ${EVENT_CLUB_MAX} characters or fewer.`;
+  }
+
+  if (options.requireClubId) {
+    const cleanClubId = (values.clubId || '').trim();
+    if (!/^[a-zA-Z0-9_-]{2,80}$/.test(cleanClubId)) {
+      errors.clubId = 'Select an active hosting club.';
+    }
   }
 
   if (!ALL_EVENT_CATEGORIES.includes(values.category)) {

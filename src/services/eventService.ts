@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -23,6 +24,7 @@ import type {
   SchoolEvent,
 } from '../types/event';
 import type { MemberRole } from '../types/membership';
+import { computeClubDiscoverKey, mapEventCategoryToClubCategory, slugifyClubName } from '../utils/clubValidation';
 import { isSafeMediaUrl } from '../utils/eventMedia';
 import {
   ALL_EVENT_CATEGORIES,
@@ -271,6 +273,17 @@ function generateEventId(title: string): string {
   return `evt-${slug || 'campus'}-${rand}`;
 }
 
+async function touchClubActivity(schoolId: string, clubId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'schools', schoolId, 'clubs', clubId), {
+      updatedAt: serverTimestamp(),
+      lastActivityAt: serverTimestamp(),
+    });
+  } catch {
+    // Best-effort club activity bump
+  }
+}
+
 export async function createManagedEvent(params: {
   values: EventFormValues;
   status: 'draft' | 'published';
@@ -279,7 +292,7 @@ export async function createManagedEvent(params: {
   creatorUid: string;
 }): Promise<string> {
   const { values, status, schoolId, timezone, creatorUid } = params;
-  const validation = validateEventForm(values, status, timezone);
+  const validation = validateEventForm(values, status, timezone, { requireClubId: true });
   if (!validation.valid || !validation.startAt || !validation.endAt) {
     const firstError = Object.values(validation.errors)[0] || 'Event details are invalid.';
     throw new Error(firstError);
@@ -288,6 +301,7 @@ export async function createManagedEvent(params: {
   const eventId = generateEventId(values.title);
   const path = `events/${eventId}`;
   const cleanImage = values.imageUrl.trim();
+  const resolvedClubId = (values.clubId || slugifyClubId(values.hostClub)).trim();
 
   const payload = {
     id: eventId,
@@ -295,7 +309,7 @@ export async function createManagedEvent(params: {
     title: values.title.trim().slice(0, EVENT_TITLE_MAX),
     description: values.description.trim().slice(0, EVENT_DESC_MAX),
     hostClub: values.hostClub.trim().slice(0, EVENT_CLUB_MAX),
-    clubId: slugifyClubId(values.hostClub),
+    clubId: resolvedClubId,
     category: values.category,
     startAt: Timestamp.fromDate(validation.startAt),
     endAt: Timestamp.fromDate(validation.endAt),
@@ -313,6 +327,9 @@ export async function createManagedEvent(params: {
 
   try {
     await setDoc(doc(db, 'events', eventId), payload);
+    if (status === 'published') {
+      void touchClubActivity(schoolId, resolvedClubId);
+    }
     return eventId;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
@@ -337,12 +354,13 @@ export async function updateManagedEvent(params: {
 
   const path = `events/${existing.id}`;
   const cleanImage = values.imageUrl.trim();
+  const resolvedClubId = (values.clubId || existing.clubId || slugifyClubId(values.hostClub)).trim();
 
   const updatePayload: Record<string, unknown> = {
     title: values.title.trim().slice(0, EVENT_TITLE_MAX),
     description: values.description.trim().slice(0, EVENT_DESC_MAX),
     hostClub: values.hostClub.trim().slice(0, EVENT_CLUB_MAX),
-    clubId: slugifyClubId(values.hostClub),
+    clubId: resolvedClubId,
     category: values.category,
     startAt: Timestamp.fromDate(validation.startAt),
     endAt: Timestamp.fromDate(validation.endAt),
@@ -365,6 +383,9 @@ export async function updateManagedEvent(params: {
 
   try {
     await updateDoc(doc(db, 'events', existing.id), updatePayload);
+    if (targetStatus === 'published') {
+      void touchClubActivity(existing.schoolId, resolvedClubId);
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
@@ -388,6 +409,7 @@ export async function publishDraftEvent(existing: SchoolEvent): Promise<void> {
         existing.createdBy
       ),
     });
+    void touchClubActivity(existing.schoolId, existing.clubId);
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
@@ -476,6 +498,42 @@ export async function inspectMigrationState(
   }
 }
 
+async function ensureClubExistsForSeed(params: {
+  schoolId: string;
+  clubId: string;
+  clubName: string;
+  category: EventCategory;
+  location: string;
+  adminUid: string;
+}): Promise<void> {
+  const clubRef = doc(db, 'schools', params.schoolId, 'clubs', params.clubId);
+  const existing = await getDoc(clubRef);
+  if (existing.exists()) return;
+
+  const clubCategory = mapEventCategoryToClubCategory(params.category, params.clubName);
+  const slug = slugifyClubName(params.clubId);
+  await setDoc(clubRef, {
+    id: params.clubId,
+    schoolId: params.schoolId,
+    name: params.clubName.slice(0, 80),
+    slug,
+    shortDescription: `Official campus chapter hosting ${clubCategory.toLowerCase()} activities and student meetups.`,
+    description: `${params.clubName} brings students together around ${clubCategory.toLowerCase()} workshops, collaborative sessions, and campus events. Open to interested students across all grade levels.`,
+    category: clubCategory,
+    visibility: 'public',
+    status: 'active',
+    isOfficial: true,
+    discoverKey: computeClubDiscoverKey(params.schoolId, 'active', 'public'),
+    meetingLocation: params.location.slice(0, 120),
+    followerCount: 0,
+    isDemoSeed: true,
+    createdBy: params.adminUid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    lastActivityAt: serverTimestamp(),
+  });
+}
+
 export async function runControlledMigration(
   schoolId: string,
   timezone: string,
@@ -500,10 +558,20 @@ export async function runControlledMigration(
       const data = docSnap.data();
       const needsMigration =
         !data.schoolId || !data.startAt || !data.status || !data.discoverKey || !data.id;
-      if (!needsMigration) continue;
 
       const mapped = mapFirestoreEventDoc(docSnap.id, data);
       if (!mapped) continue;
+
+      await ensureClubExistsForSeed({
+        schoolId,
+        clubId: mapped.clubId,
+        clubName: mapped.hostClub,
+        category: mapped.category,
+        location: mapped.location || 'Main Campus',
+        adminUid,
+      });
+
+      if (!needsMigration) continue;
 
       const demoMatch = demoById.get(docSnap.id);
       const startAt = mapped.startAt;
@@ -537,6 +605,15 @@ export async function runControlledMigration(
     }
 
     for (const demoEvt of demoEvents) {
+      await ensureClubExistsForSeed({
+        schoolId,
+        clubId: demoEvt.clubId,
+        clubName: demoEvt.hostClub,
+        category: demoEvt.category,
+        location: demoEvt.location || 'Main Campus',
+        adminUid,
+      });
+
       if (existingIds.has(demoEvt.id)) continue;
       await setDoc(doc(db, 'events', demoEvt.id), {
         id: demoEvt.id,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { motion } from 'motion/react';
 import {
+  Bell,
   BookmarkCheck,
   ChevronDown,
   Compass,
@@ -9,10 +10,14 @@ import {
   LogOut,
   RefreshCw,
   Search,
+  Settings,
   Sparkles,
   User as UserIcon,
+  Users,
 } from 'lucide-react';
 import type { AppView } from '../types/event';
+import type { AppNotification } from '../types/notification';
+import { NotificationBellDropdown } from './notifications/NotificationBellDropdown';
 
 interface HeaderProps {
   activeView: AppView;
@@ -22,6 +27,10 @@ interface HeaderProps {
   authLoading: boolean;
   isRefreshing: boolean;
   rsvpTotalCount: number;
+  notifications: AppNotification[];
+  unreadNotificationCount: number;
+  onSelectNotification: (notification: AppNotification) => void;
+  onMarkAllNotificationsRead: () => void;
   canAccessOrganizer?: boolean;
   onRefresh: () => void;
   onSignIn: () => void;
@@ -36,6 +45,10 @@ export function Header({
   authLoading,
   isRefreshing,
   rsvpTotalCount,
+  notifications,
+  unreadNotificationCount,
+  onSelectNotification,
+  onMarkAllNotificationsRead,
   canAccessOrganizer = false,
   onRefresh,
   onSignIn,
@@ -66,9 +79,10 @@ export function Header({
   const navItems: { id: AppView; label: string; icon: typeof Compass; badge?: number }[] = [
     { id: 'discover', label: 'Discover', icon: Sparkles },
     { id: 'explore', label: 'Explore Events', icon: Compass },
+    { id: 'clubs', label: 'Clubs', icon: Users },
     {
       id: 'my-rsvps',
-      label: 'My RSVPs',
+      label: 'My Events',
       icon: BookmarkCheck,
       badge: user && rsvpTotalCount > 0 ? rsvpTotalCount : undefined,
     },
@@ -79,8 +93,8 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#E5E7EB] bg-white">
-      <div className="mx-auto flex h-14 md:h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-        <div className="flex items-center gap-8 shrink-0">
+      <div className="mx-auto flex h-14 md:h-16 max-w-6xl items-center justify-between gap-3 lg:gap-4 px-4 sm:px-6">
+        <div className="flex items-center gap-4 lg:gap-7 shrink-0">
           <button
             type="button"
             onClick={() => onNavigate('discover')}
@@ -109,16 +123,17 @@ export function Header({
             </span>
           </button>
 
-          <nav className="hidden md:flex items-center gap-1" aria-label="Primary navigation">
+          <nav className="hidden md:flex items-center gap-0.5 lg:gap-1" aria-label="Primary navigation">
             {navItems.map((item) => {
-              const isActive = activeView === item.id;
+              const isActive =
+                activeView === item.id || (item.id === 'clubs' && activeView === 'club-profile');
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => onNavigate(item.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`relative inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04] ${
+                  className={`relative inline-flex items-center gap-1.5 rounded-lg px-2.5 lg:px-3 py-2 text-xs lg:text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04] ${
                     isActive
                       ? 'text-[#171717]'
                       : 'text-[#737373] hover:text-[#171717]'
@@ -169,6 +184,17 @@ export function Header({
             />
             <span className="hidden sm:inline">Refresh</span>
           </button>
+
+          <NotificationBellDropdown
+            isSignedIn={Boolean(user)}
+            notifications={notifications}
+            unreadCount={unreadNotificationCount}
+            onSelectNotification={onSelectNotification}
+            onMarkAllRead={onMarkAllNotificationsRead}
+            onOpenCenter={() => onNavigate('notifications')}
+            onOpenPreferences={() => onNavigate('notification-preferences')}
+            onSignIn={onSignIn}
+          />
 
           {authLoading ? (
             <div
@@ -232,11 +258,54 @@ export function Header({
                   >
                     <span className="inline-flex items-center gap-2">
                       <BookmarkCheck className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
-                      My RSVPs
+                      My Events
                     </span>
                     <span className="font-mono tabular-nums text-[11px] text-[#737373]">
                       {rsvpTotalCount}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNavigate('clubs');
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors cursor-pointer"
+                  >
+                    <Users className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
+                    Campus Clubs
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNavigate('notifications');
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors cursor-pointer"
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Bell className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
+                      Notifications
+                    </span>
+                    {unreadNotificationCount > 0 && (
+                      <span className="font-mono tabular-nums text-[11px] font-semibold text-[#E85D04]">
+                        {unreadNotificationCount}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNavigate('notification-preferences');
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors cursor-pointer"
+                  >
+                    <Settings className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
+                    Notification Preferences
                   </button>
                   <button
                     type="button"

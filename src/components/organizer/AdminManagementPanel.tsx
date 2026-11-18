@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   DatabaseZap,
   Globe,
+  Megaphone,
   RefreshCw,
   Shield,
   UserCheck,
@@ -18,6 +19,7 @@ import {
   saveSchoolConfig,
   upsertSchoolMember,
 } from '../../services/membershipService';
+import { publishSchoolAnnouncement } from '../../services/notificationService';
 import type { MemberRole, MemberStatus, SchoolMembership } from '../../types/membership';
 
 interface AdminManagementPanelProps {
@@ -51,6 +53,11 @@ export function AdminManagementPanel({
   const [migrationReport, setMigrationReport] = useState<MigrationReport | null>(null);
   const [inspectingMigration, setInspectingMigration] = useState(false);
   const [runningMigration, setRunningMigration] = useState(false);
+
+  const [annTitle, setAnnTitle] = useState('');
+  const [annMessage, setAnnMessage] = useState('');
+  const [annPriority, setAnnPriority] = useState<'normal' | 'important'>('normal');
+  const [publishingAnn, setPublishingAnn] = useState(false);
 
   const loadMembers = useCallback(async () => {
     setMembersLoading(true);
@@ -183,6 +190,31 @@ export function AdminManagementPanel({
     setMemberEmail(member.email || '');
     setMemberRole(member.role);
     setMemberStatus(member.status);
+  };
+
+  const handlePublishAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPublishingAnn(true);
+    try {
+      await publishSchoolAnnouncement({
+        schoolId: schoolConfig.id,
+        title: annTitle,
+        message: annMessage,
+        priority: annPriority,
+        adminUid: currentAdminUid,
+      });
+      setAnnTitle('');
+      setAnnMessage('');
+      setAnnPriority('normal');
+      onShowToast('success', 'Campus announcement published to Firestore.');
+    } catch (err) {
+      onShowToast(
+        'error',
+        err instanceof Error ? err.message : 'Could not publish campus announcement.'
+      );
+    } finally {
+      setPublishingAnn(false);
+    }
   };
 
   return (
@@ -478,6 +510,80 @@ export function AdminManagementPanel({
             </div>
           </div>
         )}
+      </section>
+
+      {/* 4. School-Wide Campus Announcement */}
+      <section className="rounded-2xl border border-[#E5E7EB] bg-white p-5 sm:p-6 shadow-xs space-y-4">
+        <div>
+          <h2 className="font-display text-base font-bold text-[#171717] flex items-center gap-2">
+            <Megaphone className="h-4 w-4 text-[#E85D04]" aria-hidden="true" />
+            <span>Campus Announcement</span>
+          </h2>
+          <p className="mt-0.5 text-xs text-[#737373]">
+            Publish a school-wide notice to{' '}
+            <code className="font-mono text-[#171717]">schools/{schoolConfig.id}/announcements</code>. Active school members see notices directly in their In-App Notification Center; automated push dispatch activates once Cloud Functions are deployed.
+          </p>
+        </div>
+
+        <form onSubmit={(e) => void handlePublishAnnouncement(e)} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label htmlFor="admin-ann-title" className="block text-xs font-semibold text-[#171717] mb-1">
+                Announcement Title
+              </label>
+              <input
+                id="admin-ann-title"
+                type="text"
+                maxLength={120}
+                value={annTitle}
+                onChange={(e) => setAnnTitle(e.target.value)}
+                placeholder="e.g., Spirit Week Schedule Update"
+                className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="admin-ann-priority" className="block text-xs font-semibold text-[#171717] mb-1">
+                Priority Category
+              </label>
+              <select
+                id="admin-ann-priority"
+                value={annPriority}
+                onChange={(e) => setAnnPriority(e.target.value as 'normal' | 'important')}
+                className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+              >
+                <option value="normal">School announcement</option>
+                <option value="important">Important notice</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="admin-ann-message" className="block text-xs font-semibold text-[#171717] mb-1">
+              Message
+            </label>
+            <textarea
+              id="admin-ann-message"
+              rows={3}
+              maxLength={380}
+              value={annMessage}
+              onChange={(e) => setAnnMessage(e.target.value)}
+              placeholder="Share clear campus guidance or schedule details..."
+              className="w-full rounded-xl border border-[#E5E7EB] bg-white p-3 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={publishingAnn}
+              className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl bg-[#E85D04] px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-[#DC2F02] disabled:opacity-60 cursor-pointer"
+            >
+              <Megaphone className="h-4 w-4" aria-hidden="true" />
+              <span>{publishingAnn ? 'Publishing...' : 'Publish Announcement'}</span>
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   );

@@ -42,6 +42,22 @@ service cloud.firestore {
       return /databases/$(database)/documents/schools/$(schoolId)/members/$(uid);
     }
 
+    function clubPath(schoolId, clubId) {
+      return /databases/$(database)/documents/schools/$(schoolId)/clubs/$(clubId);
+    }
+
+    function clubMemberPath(schoolId, clubId, uid) {
+      return /databases/$(database)/documents/schools/$(schoolId)/clubs/$(clubId)/members/$(uid);
+    }
+
+    function clubFollowerPath(schoolId, clubId, uid) {
+      return /databases/$(database)/documents/schools/$(schoolId)/clubs/$(clubId)/followers/$(uid);
+    }
+
+    function userFollowedClubPath(uid, clubId) {
+      return /databases/$(database)/documents/users/$(uid)/followedClubs/$(clubId);
+    }
+
     function userMembershipPath() {
       return /databases/$(database)/documents/userMemberships/$(request.auth.uid);
     }
@@ -57,13 +73,6 @@ service cloud.firestore {
       return isBootstrappedAdmin() || hasActiveMemberDoc(schoolId);
     }
 
-    function isActiveOrganizer(schoolId) {
-      return isBootstrappedAdmin() || (
-        hasActiveMemberDoc(schoolId)
-        && get(memberPath(schoolId, request.auth.uid)).data.role in ['organizer', 'admin']
-      );
-    }
-
     function isSchoolAdmin(schoolId) {
       return isBootstrappedAdmin() || (
         hasActiveMemberDoc(schoolId)
@@ -71,9 +80,37 @@ service cloud.firestore {
       );
     }
 
+    function hasActiveClubMemberDoc(schoolId, clubId) {
+      return isVerifiedUser()
+        && isValidId(schoolId)
+        && isValidId(clubId)
+        && exists(clubMemberPath(schoolId, clubId, request.auth.uid))
+        && get(clubMemberPath(schoolId, clubId, request.auth.uid)).data.status == 'active';
+    }
+
+    function isActiveClubOrganizer(schoolId, clubId) {
+      return isSchoolAdmin(schoolId)
+        || (isActiveSchoolMember(schoolId) && hasActiveClubMemberDoc(schoolId, clubId));
+    }
+
+    function isClubActive(schoolId, clubId) {
+      return isValidId(schoolId)
+        && isValidId(clubId)
+        && exists(clubPath(schoolId, clubId))
+        && get(clubPath(schoolId, clubId)).data.status == 'active';
+    }
+
     function expectedDiscoverKey(data) {
       return data.status == 'draft'
         ? ('draft:' + data.createdBy)
+        : (data.visibility == 'school'
+            ? ('school:' + data.schoolId)
+            : ('public:' + data.schoolId));
+    }
+
+    function expectedClubDiscoverKey(data) {
+      return data.status == 'suspended'
+        ? ('suspended:' + data.schoolId)
         : (data.visibility == 'school'
             ? ('school:' + data.schoolId)
             : ('public:' + data.schoolId));
@@ -90,6 +127,20 @@ service cloud.firestore {
       ];
     }
 
+    function isValidClubCategory(category) {
+      return category in [
+        'Technology & Computing',
+        'Robotics & Engineering',
+        'Arts & Music',
+        'Sports & Athletics',
+        'Leadership & Student Government',
+        'Academic & Research',
+        'Culture & Community',
+        'Entrepreneurship',
+        'Social & Volunteering'
+      ];
+    }
+
     function isValidImageUrl(url) {
       return url is string
         && url.size() >= 1
@@ -100,12 +151,25 @@ service cloud.firestore {
     // Validation blueprint for School settings documents
     function isValidSchool(data, schoolId) {
       return data.keys().hasAll(['id', 'name', 'timezone', 'allowPublicDiscovery', 'updatedAt', 'updatedBy'])
-        && data.keys().hasOnly(['id', 'name', 'timezone', 'allowPublicDiscovery', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly([
+          'id',
+          'name',
+          'slug',
+          'timezone',
+          'status',
+          'allowPublicDiscovery',
+          'createdAt',
+          'updatedAt',
+          'updatedBy'
+        ])
         && isValidId(data.id)
         && data.id == schoolId
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
+        && (!('slug' in data) || (data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 128 && data.slug.matches('^[a-z0-9\\-]+$')))
         && data.timezone is string && data.timezone.size() >= 2 && data.timezone.size() <= 64
+        && (!('status' in data) || data.status in ['active', 'inactive'])
         && data.allowPublicDiscovery is bool
+        && (!('createdAt' in data) || data.createdAt is timestamp)
         && data.updatedAt is timestamp
         && isValidId(data.updatedBy);
     }
@@ -139,7 +203,134 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    // Validation blueprint for Phase 2 Event documents
+    // Validation blueprint for Phase 3 Club documents
+    function isValidClub(data, schoolId, clubId) {
+      return data.keys().hasAll([
+          'id',
+          'schoolId',
+          'name',
+          'slug',
+          'description',
+          'category',
+          'visibility',
+          'status',
+          'isOfficial',
+          'discoverKey',
+          'followerCount',
+          'createdBy',
+          'createdAt',
+          'updatedAt',
+          'lastActivityAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'schoolId',
+          'name',
+          'slug',
+          'shortDescription',
+          'description',
+          'category',
+          'visibility',
+          'status',
+          'isOfficial',
+          'discoverKey',
+          'coverImageUrl',
+          'logoUrl',
+          'meetingSchedule',
+          'meetingLocation',
+          'contactEmail',
+          'publicOrganizers',
+          'announcement',
+          'followerCount',
+          'isDemoSeed',
+          'createdBy',
+          'createdAt',
+          'updatedAt',
+          'lastActivityAt'
+        ])
+        && isValidId(data.id)
+        && data.id == clubId
+        && data.id.size() >= 2
+        && data.id.size() <= 80
+        && isValidId(data.schoolId)
+        && data.schoolId == schoolId
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 80
+        && data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 80 && data.slug.matches('^[a-z0-9\\-]+$')
+        && (!('shortDescription' in data) || (data.shortDescription is string && data.shortDescription.size() <= 180))
+        && data.description is string && data.description.size() >= 10 && data.description.size() <= 1200
+        && isValidClubCategory(data.category)
+        && data.visibility in ['public', 'school']
+        && data.status in ['active', 'suspended']
+        && data.isOfficial is bool
+        && data.discoverKey is string && data.discoverKey == expectedClubDiscoverKey(data)
+        && (!('coverImageUrl' in data) || isValidImageUrl(data.coverImageUrl))
+        && (!('logoUrl' in data) || isValidImageUrl(data.logoUrl))
+        && (!('meetingSchedule' in data) || (data.meetingSchedule is string && data.meetingSchedule.size() <= 120))
+        && (!('meetingLocation' in data) || (data.meetingLocation is string && data.meetingLocation.size() <= 120))
+        && (!('contactEmail' in data) || (data.contactEmail is string && data.contactEmail.size() <= 160))
+        && (!('publicOrganizers' in data) || (data.publicOrganizers is list && data.publicOrganizers.size() <= 8))
+        && (!('announcement' in data) || (data.announcement is string && data.announcement.size() <= 280))
+        && data.followerCount is int && data.followerCount >= 0 && data.followerCount <= 100000
+        && (!('isDemoSeed' in data) || data.isDemoSeed is bool)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.lastActivityAt is timestamp;
+    }
+
+    function isValidClubMember(data, schoolId, clubId, uid) {
+      return data.keys().hasAll(['uid', 'schoolId', 'clubId', 'role', 'status', 'assignedBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'schoolId', 'clubId', 'role', 'roleTitle', 'displayName', 'status', 'assignedBy', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid) && data.uid == uid
+        && isValidId(data.schoolId) && data.schoolId == schoolId
+        && isValidId(data.clubId) && data.clubId == clubId
+        && data.role in ['organizer', 'lead']
+        && (!('roleTitle' in data) || (data.roleTitle is string && data.roleTitle.size() <= 80))
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120))
+        && data.status in ['active', 'revoked']
+        && isValidId(data.assignedBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidManagedClubMirror(data, uid, clubId) {
+      return data.keys().hasAll(['uid', 'schoolId', 'clubId', 'role', 'status', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'schoolId', 'clubId', 'clubName', 'role', 'roleTitle', 'status', 'assignedBy', 'updatedAt'])
+        && isValidId(data.uid) && data.uid == uid
+        && isValidId(data.schoolId)
+        && isValidId(data.clubId) && data.clubId == clubId
+        && (!('clubName' in data) || (data.clubName is string && data.clubName.size() <= 80))
+        && data.role in ['organizer', 'lead']
+        && (!('roleTitle' in data) || (data.roleTitle is string && data.roleTitle.size() <= 80))
+        && data.status in ['active', 'revoked']
+        && (!('assignedBy' in data) || isValidId(data.assignedBy))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidClubFollower(data, schoolId, clubId, uid) {
+      return data.keys().hasAll(['uid', 'schoolId', 'clubId', 'notificationsEnabled', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'schoolId', 'clubId', 'notificationsEnabled', 'createdAt'])
+        && isValidId(data.uid) && data.uid == uid && data.uid == request.auth.uid
+        && isValidId(data.schoolId) && data.schoolId == schoolId
+        && isValidId(data.clubId) && data.clubId == clubId
+        && data.notificationsEnabled is bool
+        && data.createdAt is timestamp
+        && data.createdAt == request.time;
+    }
+
+    function isValidUserFollowedClub(data, clubId) {
+      return data.keys().hasAll(['clubId', 'schoolId', 'clubName', 'clubCategory', 'notificationsEnabled', 'followedAt'])
+        && data.keys().hasOnly(['clubId', 'schoolId', 'clubName', 'clubCategory', 'notificationsEnabled', 'followedAt'])
+        && isValidId(data.clubId) && data.clubId == clubId
+        && isValidId(data.schoolId)
+        && data.clubName is string && data.clubName.size() >= 2 && data.clubName.size() <= 80
+        && isValidClubCategory(data.clubCategory)
+        && data.notificationsEnabled is bool
+        && data.followedAt is timestamp
+        && data.followedAt == request.time;
+    }
+
+    // Validation blueprint for Phase 2 & 3 Event documents
     function isValidEvent(data, eventId) {
       return data.keys().hasAll([
           'id',
@@ -223,6 +414,165 @@ service cloud.firestore {
         && data.createdAt == request.time;
     }
 
+    // Validation blueprint for Phase 4 UserNotification documents (read-only/mark-read on client)
+    function isValidNotification(data, uid, notificationId) {
+      return data.keys().hasAll([
+          'id',
+          'recipientUid',
+          'schoolId',
+          'type',
+          'title',
+          'message',
+          'createdAt',
+          'entityType',
+          'entityId',
+          'status',
+          'dedupKey'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'recipientUid',
+          'schoolId',
+          'type',
+          'title',
+          'message',
+          'createdAt',
+          'readAt',
+          'entityType',
+          'entityId',
+          'actionUrl',
+          'status',
+          'dedupKey'
+        ])
+        && isValidId(data.id)
+        && data.id == notificationId
+        && isValidId(data.recipientUid)
+        && data.recipientUid == uid
+        && isValidId(data.schoolId)
+        && data.type in ['event_update', 'club_activity', 'event_reminder', 'announcement', 'rsvp_update']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 400
+        && data.createdAt is timestamp
+        && (!('readAt' in data) || data.readAt is timestamp)
+        && data.entityType in ['event', 'club', 'school']
+        && isValidId(data.entityId)
+        && (!('actionUrl' in data) || (data.actionUrl is string && data.actionUrl.size() <= 240))
+        && data.status in ['unread', 'read']
+        && data.dedupKey is string && data.dedupKey.size() >= 1 && data.dedupKey.size() <= 160;
+    }
+
+    // Validation blueprint for Phase 4 NotificationPreferences & Interests
+    function isValidNotificationPreferences(data, uid) {
+      return data.keys().hasAll([
+          'uid',
+          'schoolId',
+          'reminder24h',
+          'reminder1h',
+          'clubNewEvents',
+          'clubEventUpdates',
+          'schoolAnnouncements',
+          'importantNotices',
+          'inAppEnabled',
+          'pushEnabled',
+          'interestCategories',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'schoolId',
+          'reminder24h',
+          'reminder1h',
+          'clubNewEvents',
+          'clubEventUpdates',
+          'schoolAnnouncements',
+          'importantNotices',
+          'inAppEnabled',
+          'pushEnabled',
+          'interestCategories',
+          'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.uid == uid
+        && data.uid == request.auth.uid
+        && isValidId(data.schoolId)
+        && data.reminder24h is bool
+        && data.reminder1h is bool
+        && data.clubNewEvents is bool
+        && data.clubEventUpdates is bool
+        && data.schoolAnnouncements is bool
+        && data.importantNotices is bool
+        && data.inAppEnabled is bool
+        && data.pushEnabled is bool
+        && data.interestCategories is list
+        && data.interestCategories.size() <= 6
+        && data.interestCategories.hasOnly([
+          'STEM & Makers',
+          'Leadership',
+          'Athletics',
+          'Academic',
+          'Arts & Music',
+          'Social & Community'
+        ])
+        && (data.interestCategories.size() == 0 || isValidCategory(data.interestCategories[0]))
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation blueprint for Phase 4 FCM DeviceToken documents
+    function isValidDeviceToken(data, uid, tokenId) {
+      return data.keys().hasAll([
+          'tokenId',
+          'uid',
+          'schoolId',
+          'token',
+          'platform',
+          'enabled',
+          'permissionState',
+          'createdAt',
+          'updatedAt',
+          'lastRefreshedAt'
+        ])
+        && data.keys().hasOnly([
+          'tokenId',
+          'uid',
+          'schoolId',
+          'token',
+          'platform',
+          'enabled',
+          'permissionState',
+          'createdAt',
+          'updatedAt',
+          'lastRefreshedAt'
+        ])
+        && isValidId(data.tokenId)
+        && data.tokenId == tokenId
+        && isValidId(data.uid)
+        && data.uid == uid
+        && data.uid == request.auth.uid
+        && isValidId(data.schoolId)
+        && data.token is string && data.token.size() >= 16 && data.token.size() <= 512
+        && data.platform == 'web'
+        && data.enabled is bool
+        && data.permissionState in ['granted', 'denied', 'default', 'unsupported']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.lastRefreshedAt is timestamp;
+    }
+
+    // Validation blueprint for Phase 4 SchoolAnnouncement documents
+    function isValidSchoolAnnouncement(data, schoolId, announcementId) {
+      return data.keys().hasAll(['id', 'schoolId', 'title', 'message', 'priority', 'createdBy', 'createdAt'])
+        && data.keys().hasOnly(['id', 'schoolId', 'title', 'message', 'priority', 'createdBy', 'createdAt'])
+        && isValidId(data.id)
+        && data.id == announcementId
+        && isValidId(data.schoolId)
+        && data.schoolId == schoolId
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 120
+        && data.message is string && data.message.size() >= 5 && data.message.size() <= 380
+        && data.priority in ['normal', 'important']
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp;
+    }
+
     // Admin-managed membership mirror for index-free & rule-safe list queries
     match /userMemberships/{uid} {
       allow get: if isValidId(uid) && isSignedIn() && isOwner(uid);
@@ -236,7 +586,167 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // School configuration and scoped membership collection
+    // User-scoped followed clubs & managed club assignments
+    match /users/{uid} {
+      allow read, write: if false;
+
+      match /followedClubs/{clubId} {
+        allow get, list: if isValidId(uid) && isValidId(clubId) && isSignedIn() && isOwner(uid);
+
+        allow create: if isValidId(uid)
+          && isValidId(clubId)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidUserFollowedClub(incoming(), clubId)
+          && existsAfter(clubFollowerPath(incoming().schoolId, clubId, uid));
+
+        allow update: if isValidId(uid)
+          && isValidId(clubId)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['notificationsEnabled'])
+          && incoming().notificationsEnabled is bool;
+
+        allow delete: if isValidId(uid)
+          && isValidId(clubId)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && !existsAfter(clubFollowerPath(existing().schoolId, clubId, uid));
+      }
+
+      match /managedClubs/{clubId} {
+        allow get, list: if isValidId(uid) && isValidId(clubId) && isVerifiedUser() && isOwner(uid);
+
+        allow create, update: if isValidId(uid)
+          && isValidId(clubId)
+          && isVerifiedUser()
+          && isValidManagedClubMirror(incoming(), uid, clubId)
+          && isSchoolAdmin(incoming().schoolId)
+          && incoming().updatedAt == request.time
+          && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid);
+
+        allow delete: if false;
+      }
+
+      // Phase 4: User Notifications (server-created; client may read & mark unread -> read)
+      match /notifications/{notificationId} {
+        allow get: if isValidId(uid) && isValidId(notificationId) && isSignedIn() && isOwner(uid);
+
+        allow list: if isValidId(uid)
+          && isSignedIn()
+          && isOwner(uid)
+          && resource.data.recipientUid == request.auth.uid;
+
+        allow create: if false;
+
+        allow update: if isValidId(uid)
+          && isValidId(notificationId)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidNotification(incoming(), uid, notificationId)
+          && existing().status == 'unread'
+          && incoming().status == 'read'
+          && incoming().readAt == request.time
+          && incoming().id == existing().id
+          && incoming().recipientUid == existing().recipientUid
+          && incoming().schoolId == existing().schoolId
+          && incoming().type == existing().type
+          && incoming().title == existing().title
+          && incoming().message == existing().message
+          && incoming().createdAt == existing().createdAt
+          && incoming().entityType == existing().entityType
+          && incoming().entityId == existing().entityId
+          && incoming().dedupKey == existing().dedupKey
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'readAt']);
+
+        allow delete: if false;
+      }
+
+      // Phase 4: Notification Preferences & Interest Categories
+      match /notificationPreferences/{settingId} {
+        allow get: if isValidId(uid) && settingId == 'settings' && isSignedIn() && isOwner(uid);
+
+        allow list: if isValidId(uid)
+          && isSignedIn()
+          && isOwner(uid)
+          && resource.data.uid == request.auth.uid;
+
+        allow create: if isValidId(uid)
+          && settingId == 'settings'
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidNotificationPreferences(incoming(), uid)
+          && incoming().updatedAt == request.time;
+
+        allow update: if isValidId(uid)
+          && settingId == 'settings'
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidNotificationPreferences(incoming(), uid)
+          && incoming().uid == existing().uid
+          && incoming().schoolId == existing().schoolId
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'reminder24h',
+            'reminder1h',
+            'clubNewEvents',
+            'clubEventUpdates',
+            'schoolAnnouncements',
+            'importantNotices',
+            'inAppEnabled',
+            'pushEnabled',
+            'interestCategories',
+            'updatedAt'
+          ]);
+
+        allow delete: if false;
+      }
+
+      // Phase 4: Opt-in FCM Browser Device Tokens
+      match /deviceTokens/{tokenId} {
+        allow get: if isValidId(uid) && isValidId(tokenId) && isSignedIn() && isOwner(uid);
+
+        allow list: if isValidId(uid)
+          && isSignedIn()
+          && isOwner(uid)
+          && resource.data.uid == request.auth.uid;
+
+        allow create: if isValidId(uid)
+          && isValidId(tokenId)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidDeviceToken(incoming(), uid, tokenId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && incoming().lastRefreshedAt == request.time;
+
+        allow update: if isValidId(uid)
+          && isValidId(tokenId)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidDeviceToken(incoming(), uid, tokenId)
+          && incoming().tokenId == existing().tokenId
+          && incoming().uid == existing().uid
+          && incoming().schoolId == existing().schoolId
+          && incoming().platform == existing().platform
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'token',
+            'enabled',
+            'permissionState',
+            'updatedAt',
+            'lastRefreshedAt'
+          ]);
+
+        allow delete: if isValidId(uid)
+          && isValidId(tokenId)
+          && isVerifiedUser()
+          && isOwner(uid);
+      }
+    }
+
+    // School configuration, scoped memberships, and clubs
     match /schools/{schoolId} {
       allow get: if isValidId(schoolId);
       allow list: if false;
@@ -255,7 +765,9 @@ service cloud.firestore {
         && incoming().updatedBy == request.auth.uid
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'name',
+          'slug',
           'timezone',
+          'status',
           'allowPublicDiscovery',
           'updatedAt',
           'updatedBy'
@@ -299,6 +811,256 @@ service cloud.firestore {
 
         allow delete: if false;
       }
+
+      // Phase 3: Campus Clubs subcollection
+      match /clubs/{clubId} {
+        allow get: if isValidId(schoolId) && isValidId(clubId) && (
+          (existing().status == 'active' && existing().visibility == 'public')
+          || (isVerifiedUser() && existing().status == 'active' && isActiveSchoolMember(schoolId))
+          || isSchoolAdmin(schoolId)
+          || isActiveClubOrganizer(schoolId, clubId)
+        );
+
+        allow list: if isValidId(schoolId) && (
+          (resource.data.discoverKey == ('public:' + schoolId))
+          || (isVerifiedUser()
+            && exists(userMembershipPath())
+            && get(userMembershipPath()).data.status == 'active'
+            && get(userMembershipPath()).data.schoolId == schoolId
+            && resource.data.discoverKey == ('school:' + schoolId))
+          || isSchoolAdmin(schoolId)
+        );
+
+        // Only School Admins may create new clubs
+        allow create: if isValidId(schoolId)
+          && isValidId(clubId)
+          && isSchoolAdmin(schoolId)
+          && isValidClub(incoming(), schoolId, clubId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().followerCount == 0
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && incoming().lastActivityAt == request.time;
+
+        // Action-based update:
+        // (1) Atomic Follow / Unfollow followerCount +/- 1
+        // (2) School Admin full club management (excluding followerCount & immutable IDs)
+        // (3) Assigned Club Organizer permitted profile edits (cannot alter status/isOfficial/followerCount/visibility)
+        allow update: if isVerifiedUser()
+          && isValidId(schoolId)
+          && isValidId(clubId)
+          && isValidClub(incoming(), schoolId, clubId)
+          && (
+            // Action 1: Atomic Follow / Unfollow
+            (
+              (existing().visibility == 'public' || isActiveSchoolMember(schoolId))
+              && incoming().diff(existing()).affectedKeys().hasOnly(['followerCount'])
+              && (
+                (
+                  existing().status == 'active'
+                  && incoming().followerCount == existing().followerCount + 1
+                  && !exists(clubFollowerPath(schoolId, clubId, request.auth.uid))
+                  && existsAfter(clubFollowerPath(schoolId, clubId, request.auth.uid))
+                )
+                || (
+                  existing().followerCount >= 1
+                  && incoming().followerCount == existing().followerCount - 1
+                  && exists(clubFollowerPath(schoolId, clubId, request.auth.uid))
+                  && !existsAfter(clubFollowerPath(schoolId, clubId, request.auth.uid))
+                )
+              )
+            )
+            ||
+            // Action 2: School Admin edit / suspend / reactivate / publicOrganizers
+            (
+              isSchoolAdmin(schoolId)
+              && incoming().id == existing().id
+              && incoming().schoolId == existing().schoolId
+              && incoming().slug == existing().slug
+              && incoming().createdBy == existing().createdBy
+              && incoming().createdAt == existing().createdAt
+              && incoming().followerCount == existing().followerCount
+              && incoming().updatedAt == request.time
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'name',
+                'shortDescription',
+                'description',
+                'category',
+                'visibility',
+                'status',
+                'isOfficial',
+                'discoverKey',
+                'coverImageUrl',
+                'logoUrl',
+                'meetingSchedule',
+                'meetingLocation',
+                'contactEmail',
+                'publicOrganizers',
+                'announcement',
+                'isDemoSeed',
+                'updatedAt',
+                'lastActivityAt'
+              ])
+            )
+            ||
+            // Action 3: Assigned Club Organizer permitted profile edits
+            (
+              isActiveClubOrganizer(schoolId, clubId)
+              && existing().status == 'active'
+              && incoming().id == existing().id
+              && incoming().schoolId == existing().schoolId
+              && incoming().slug == existing().slug
+              && incoming().name == existing().name
+              && incoming().category == existing().category
+              && incoming().visibility == existing().visibility
+              && incoming().status == existing().status
+              && incoming().isOfficial == existing().isOfficial
+              && incoming().discoverKey == existing().discoverKey
+              && incoming().createdBy == existing().createdBy
+              && incoming().createdAt == existing().createdAt
+              && incoming().followerCount == existing().followerCount
+              && incoming().updatedAt == request.time
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'shortDescription',
+                'description',
+                'coverImageUrl',
+                'logoUrl',
+                'meetingSchedule',
+                'meetingLocation',
+                'contactEmail',
+                'announcement',
+                'updatedAt',
+                'lastActivityAt'
+              ])
+            )
+          );
+
+        allow delete: if false;
+
+        // Club-scoped organizer assignments (admin-controlled)
+        match /members/{uid} {
+          allow get: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isValidId(uid)
+            && (isSchoolAdmin(schoolId) || (isVerifiedUser() && isOwner(uid)));
+
+          allow list: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isSchoolAdmin(schoolId);
+
+          allow create: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isValidId(uid)
+            && isSchoolAdmin(schoolId)
+            && isValidClubMember(incoming(), schoolId, clubId, uid)
+            && incoming().assignedBy == request.auth.uid
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time;
+
+          allow update: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isValidId(uid)
+            && isSchoolAdmin(schoolId)
+            && isValidClubMember(incoming(), schoolId, clubId, uid)
+            && incoming().uid == existing().uid
+            && incoming().schoolId == existing().schoolId
+            && incoming().clubId == existing().clubId
+            && incoming().createdAt == existing().createdAt
+            && incoming().assignedBy == request.auth.uid
+            && incoming().updatedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'role',
+              'roleTitle',
+              'displayName',
+              'status',
+              'assignedBy',
+              'updatedAt'
+            ]);
+
+          allow delete: if false;
+        }
+
+        // Club followers subcollection (keyed by student UID; no list enumeration)
+        match /followers/{uid} {
+          allow get: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isValidId(uid)
+            && isSignedIn()
+            && isOwner(uid);
+
+          allow list: if false;
+
+          allow create: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isValidId(uid)
+            && isVerifiedUser()
+            && isOwner(uid)
+            && isValidClubFollower(incoming(), schoolId, clubId, uid)
+            && exists(clubPath(schoolId, clubId))
+            && get(clubPath(schoolId, clubId)).data.status == 'active'
+            && (
+              get(clubPath(schoolId, clubId)).data.visibility == 'public'
+              || isActiveSchoolMember(schoolId)
+            )
+            && getAfter(clubPath(schoolId, clubId)).data.followerCount
+              == get(clubPath(schoolId, clubId)).data.followerCount + 1
+            && existsAfter(userFollowedClubPath(uid, clubId));
+
+          allow update: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isValidId(uid)
+            && isVerifiedUser()
+            && isOwner(uid)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['notificationsEnabled'])
+            && incoming().notificationsEnabled is bool;
+
+          allow delete: if isValidId(schoolId)
+            && isValidId(clubId)
+            && isValidId(uid)
+            && isVerifiedUser()
+            && isOwner(uid)
+            && exists(clubPath(schoolId, clubId))
+            && getAfter(clubPath(schoolId, clubId)).data.followerCount
+              == get(clubPath(schoolId, clubId)).data.followerCount - 1
+            && !existsAfter(userFollowedClubPath(uid, clubId));
+        }
+      }
+
+      // Phase 4: Admin-published Campus Announcements (triggers server-side notification fan-out)
+      match /announcements/{announcementId} {
+        allow get: if isValidId(schoolId)
+          && isValidId(announcementId)
+          && isActiveSchoolMember(schoolId);
+
+        allow list: if isValidId(schoolId) && (
+          (isVerifiedUser()
+            && exists(userMembershipPath())
+            && get(userMembershipPath()).data.status == 'active'
+            && get(userMembershipPath()).data.schoolId == schoolId
+            && resource.data.schoolId == schoolId)
+          || isBootstrappedAdmin()
+        );
+
+        allow create: if isValidId(schoolId)
+          && isValidId(announcementId)
+          && isSchoolAdmin(schoolId)
+          && isValidSchoolAnnouncement(incoming(), schoolId, announcementId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time;
+
+        allow update, delete: if false;
+      }
+
+      // Phase 4: Server-only Notification Jobs & Reminder Schedules
+      match /notificationJobs/{jobId} {
+        allow get: if isValidId(schoolId) && isValidId(jobId) && isSchoolAdmin(schoolId);
+
+        allow list: if isValidId(schoolId)
+          && isSchoolAdmin(schoolId)
+          && resource.data.schoolId == schoolId;
+
+        allow write: if false;
+      }
     }
 
     // Events collection
@@ -332,11 +1094,12 @@ service cloud.firestore {
         || isBootstrappedAdmin()
       );
 
-      // Event creation strictly limited to active organizers and school administrators
+      // Event creation limited to assigned Club Organizers (active club) or School Admins
       allow create: if isVerifiedUser()
         && isValidId(eventId)
         && isValidEvent(incoming(), eventId)
-        && isActiveOrganizer(incoming().schoolId)
+        && isClubActive(incoming().schoolId, incoming().clubId)
+        && isActiveClubOrganizer(incoming().schoolId, incoming().clubId)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && (
@@ -353,7 +1116,7 @@ service cloud.firestore {
           || (isSchoolAdmin(incoming().schoolId) && ('isDemoSeed' in incoming()) && incoming().isDemoSeed == true)
         );
 
-      // Action-based update: (1) Student atomic RSVP, (2) Organizer/Admin edit, (3) Admin migration of legacy doc
+      // Action-based update: (1) Student atomic RSVP, (2) Assigned Organizer/Admin edit, (3) Admin migration
       allow update: if isVerifiedUser()
         && isValidId(eventId)
         && isValidEvent(incoming(), eventId)
@@ -380,10 +1143,17 @@ service cloud.firestore {
             )
           )
           ||
-          // Action 2: Authorized Organizer (own events) or School Admin (all school events) edits/lifecycle
+          // Action 2: Assigned Club Organizer (own events, locked to assigned club) or School Admin edits
           (
             ('schoolId' in existing())
-            && (isSchoolAdmin(existing().schoolId) || (isActiveOrganizer(existing().schoolId) && existing().createdBy == request.auth.uid))
+            && (
+              isSchoolAdmin(existing().schoolId)
+              || (
+                isActiveClubOrganizer(existing().schoolId, existing().clubId)
+                && existing().clubId == incoming().clubId
+                && existing().createdBy == request.auth.uid
+              )
+            )
             && incoming().id == existing().id
             && incoming().schoolId == existing().schoolId
             && incoming().createdBy == existing().createdBy
@@ -408,6 +1178,10 @@ service cloud.firestore {
               'cancelledAt',
               'cancellationReason'
             ])
+            && (
+              incoming().status != 'published'
+              || isClubActive(incoming().schoolId, incoming().clubId)
+            )
             && (existing().status != 'cancelled' || isSchoolAdmin(existing().schoolId) || incoming().status == 'cancelled')
             && (
               incoming().status != 'published'

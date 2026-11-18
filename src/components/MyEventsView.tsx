@@ -10,6 +10,7 @@ interface MyEventsViewProps {
   getEffectiveRsvp: (event: SchoolEvent) => { rsvpCount: number; isGoing: boolean };
   onRsvpClick: (event: SchoolEvent) => void;
   onSelectEvent: (event: SchoolEvent) => void;
+  onSelectClubById?: (clubId: string) => void;
   onSignIn: () => void;
   onExplore: () => void;
 }
@@ -20,12 +21,14 @@ function DateGroupedSchedule({
   isSignedIn,
   onRsvpClick,
   onSelectEvent,
+  onSelectClubById,
 }: {
   events: SchoolEvent[];
   getEffectiveRsvp: (event: SchoolEvent) => { rsvpCount: number; isGoing: boolean };
   isSignedIn: boolean;
   onRsvpClick: (event: SchoolEvent) => void;
   onSelectEvent: (event: SchoolEvent) => void;
+  onSelectClubById?: (clubId: string) => void;
 }) {
   const dateGroups = groupEventsByDate(events);
   let cardIndex = 0;
@@ -75,6 +78,7 @@ function DateGroupedSchedule({
                     isSignedIn={isSignedIn}
                     onRsvpClick={onRsvpClick}
                     onSelectEvent={onSelectEvent}
+                    onSelectClubById={onSelectClubById}
                   />
                 );
               })}
@@ -92,6 +96,7 @@ export function MyEventsView({
   getEffectiveRsvp,
   onRsvpClick,
   onSelectEvent,
+  onSelectClubById,
   onSignIn,
   onExplore,
 }: MyEventsViewProps) {
@@ -204,6 +209,7 @@ export function MyEventsView({
             isSignedIn={Boolean(user)}
             onRsvpClick={onRsvpClick}
             onSelectEvent={onSelectEvent}
+            onSelectClubById={onSelectClubById}
           />
         )}
       </section>
@@ -234,6 +240,7 @@ export function MyEventsView({
             isSignedIn={Boolean(user)}
             onRsvpClick={onRsvpClick}
             onSelectEvent={onSelectEvent}
+            onSelectClubById={onSelectClubById}
           />
         )}
       </section>
@@ -265,6 +272,7 @@ export function MyEventsView({
             isSignedIn={Boolean(user)}
             onRsvpClick={onRsvpClick}
             onSelectEvent={onSelectEvent}
+            onSelectClubById={onSelectClubById}
           />
         )}
       </section>

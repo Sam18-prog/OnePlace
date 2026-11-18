@@ -18,15 +18,32 @@
           "minLength": 2,
           "maxLength": 120
         },
+        "slug": {
+          "type": "string",
+          "description": "Normalized URL-safe school slug.",
+          "pattern": "^[a-z0-9\\-]+$",
+          "minLength": 2,
+          "maxLength": 128
+        },
         "timezone": {
           "type": "string",
           "description": "IANA timezone identifier used as default for school events.",
           "minLength": 2,
           "maxLength": 64
         },
+        "status": {
+          "type": "string",
+          "enum": ["active", "inactive"],
+          "description": "Operational status of the school campus."
+        },
         "allowPublicDiscovery": {
           "type": "boolean",
-          "description": "Whether public events for this school are visible without authentication."
+          "description": "Whether public events and clubs for this school are visible without authentication."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the school record was created."
         },
         "updatedAt": {
           "type": "string",
@@ -98,6 +115,270 @@
       },
       "required": ["uid", "schoolId", "role", "status", "createdAt"]
     },
+    "Club": {
+      "title": "Club",
+      "description": "A school-affiliated student club or campus organization.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique club identifier matching document ID.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "schoolId": {
+          "type": "string",
+          "description": "School identifier owning the club.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Official display name of the club.",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL-safe lowercase slug for the club.",
+          "pattern": "^[a-z0-9\\-]+$",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "shortDescription": {
+          "type": "string",
+          "description": "Concise one-line club tagline shown in discovery cards.",
+          "maxLength": 180
+        },
+        "description": {
+          "type": "string",
+          "description": "Full club mission, activities, and joining details.",
+          "minLength": 10,
+          "maxLength": 1200
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Technology & Computing",
+            "Robotics & Engineering",
+            "Arts & Music",
+            "Sports & Athletics",
+            "Leadership & Student Government",
+            "Academic & Research",
+            "Culture & Community",
+            "Entrepreneurship",
+            "Social & Volunteering"
+          ],
+          "description": "Primary campus club category."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "school"],
+          "description": "Audience visibility scope for the club."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended"],
+          "description": "Lifecycle state; suspended clubs are hidden from discovery and cannot publish events."
+        },
+        "isOfficial": {
+          "type": "boolean",
+          "description": "Whether the club is verified/official by school administration."
+        },
+        "discoverKey": {
+          "type": "string",
+          "description": "Rule-enforced partition key (public:<schoolId> | school:<schoolId> | suspended:<schoolId>).",
+          "maxLength": 160
+        },
+        "coverImageUrl": {
+          "type": "string",
+          "description": "Validated HTTPS URL or curated local asset path for the club cover banner.",
+          "maxLength": 500
+        },
+        "logoUrl": {
+          "type": "string",
+          "description": "Validated HTTPS URL or curated local asset path for the club emblem.",
+          "maxLength": 500
+        },
+        "meetingSchedule": {
+          "type": "string",
+          "description": "Regular meeting cadence (e.g., Wednesdays at 3:30 PM).",
+          "maxLength": 120
+        },
+        "meetingLocation": {
+          "type": "string",
+          "description": "Primary meeting room or campus building.",
+          "maxLength": 120
+        },
+        "contactEmail": {
+          "type": "string",
+          "description": "Public club contact address.",
+          "maxLength": 160
+        },
+        "publicOrganizers": {
+          "type": "array",
+          "description": "Curated non-PII public organizer badges displayed on the club profile.",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "uid": { "type": "string", "maxLength": 128 },
+              "displayName": { "type": "string", "maxLength": 120 },
+              "roleTitle": { "type": "string", "maxLength": 80 }
+            },
+            "required": ["uid", "displayName", "roleTitle"]
+          }
+        },
+        "announcement": {
+          "type": "string",
+          "description": "Optional latest pinned community update from club leadership.",
+          "maxLength": 280
+        },
+        "followerCount": {
+          "type": "integer",
+          "description": "Total number of students following this club."
+        },
+        "isDemoSeed": {
+          "type": "boolean",
+          "description": "Indicates demo content seeded by an administrator."
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator who created the club.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp."
+        },
+        "lastActivityAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of latest club update or event activity."
+        }
+      },
+      "required": [
+        "id",
+        "schoolId",
+        "name",
+        "slug",
+        "description",
+        "category",
+        "visibility",
+        "status",
+        "isOfficial",
+        "discoverKey",
+        "followerCount",
+        "createdBy",
+        "createdAt",
+        "updatedAt",
+        "lastActivityAt"
+      ]
+    },
+    "ClubMember": {
+      "title": "ClubMember",
+      "description": "Club-scoped organizer assignment linking a user UID to a specific club.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "clubId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 80
+        },
+        "role": {
+          "type": "string",
+          "enum": ["organizer", "lead"]
+        },
+        "roleTitle": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "revoked"]
+        },
+        "assignedBy": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "schoolId", "clubId", "role", "status", "assignedBy", "createdAt", "updatedAt"]
+    },
+    "ManagedClubMirror": {
+      "title": "ManagedClubMirror",
+      "description": "User-indexed mirror of clubs assigned to an organizer for single-query lookup.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "clubId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 80 },
+        "clubName": { "type": "string", "maxLength": 80 },
+        "role": { "type": "string", "enum": ["organizer", "lead"] },
+        "roleTitle": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["active", "revoked"] },
+        "assignedBy": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "schoolId", "clubId", "role", "status", "updatedAt"]
+    },
+    "ClubFollower": {
+      "title": "ClubFollower",
+      "description": "Follower record under a club subcollection keyed by student UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "clubId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 80 },
+        "notificationsEnabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "schoolId", "clubId", "notificationsEnabled", "createdAt"]
+    },
+    "UserFollowedClub": {
+      "title": "UserFollowedClub",
+      "description": "Student's followed club record stored under their user document.",
+      "type": "object",
+      "properties": {
+        "clubId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 80 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "clubName": { "type": "string", "maxLength": 80 },
+        "clubCategory": { "type": "string", "maxLength": 80 },
+        "notificationsEnabled": { "type": "boolean" },
+        "followedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clubId", "schoolId", "clubName", "clubCategory", "notificationsEnabled", "followedAt"]
+    },
     "Event": {
       "title": "Event",
       "description": "A school club meeting or campus event stored in Cloud Firestore.",
@@ -134,7 +415,7 @@
         },
         "clubId": {
           "type": "string",
-          "description": "Normalized slug identifier for the hosting club.",
+          "description": "Canonical club document ID in /schools/{schoolId}/clubs/{clubId}.",
           "pattern": "^[a-zA-Z0-9_\\-]+$",
           "minLength": 2,
           "maxLength": 80
@@ -308,6 +589,356 @@
         }
       },
       "required": ["uid", "schoolId", "role", "status", "updatedAt"]
+    },
+    "UserNotification": {
+      "title": "UserNotification",
+      "description": "In-app notification delivered to a student by trusted server-side Cloud Functions.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Notification document ID matching deterministic dedup key or UUID.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "recipientUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the student recipient.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "description": "School identifier associated with the notification.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "enum": ["event_update", "club_activity", "event_reminder", "announcement", "rsvp_update"],
+          "description": "Notification category type."
+        },
+        "title": {
+          "type": "string",
+          "description": "Concise notification headline.",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable notification body text.",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the notification was created."
+        },
+        "readAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the student marked the notification as read."
+        },
+        "entityType": {
+          "type": "string",
+          "enum": ["event", "club", "school"],
+          "description": "Target entity type opened when clicking the notification."
+        },
+        "entityId": {
+          "type": "string",
+          "description": "Identifier of the target event, club, or school.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "actionUrl": {
+          "type": "string",
+          "description": "In-app route target (e.g., ?view=event&id=...).",
+          "maxLength": 240
+        },
+        "status": {
+          "type": "string",
+          "enum": ["unread", "read"],
+          "description": "Current read state of the notification."
+        },
+        "dedupKey": {
+          "type": "string",
+          "description": "Deterministic idempotency key preventing duplicate delivery.",
+          "maxLength": 160
+        }
+      },
+      "required": [
+        "id",
+        "recipientUid",
+        "schoolId",
+        "type",
+        "title",
+        "message",
+        "createdAt",
+        "entityType",
+        "entityId",
+        "status",
+        "dedupKey"
+      ]
+    },
+    "NotificationPreferences": {
+      "title": "NotificationPreferences",
+      "description": "Per-user notification delivery toggles, reminder windows, and optional discovery interests.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "reminder24h": {
+          "type": "boolean",
+          "description": "Send event reminder 24 hours before RSVPed events."
+        },
+        "reminder1h": {
+          "type": "boolean",
+          "description": "Send event reminder 1 hour before RSVPed events."
+        },
+        "clubNewEvents": {
+          "type": "boolean",
+          "description": "Notify when followed clubs publish a new event."
+        },
+        "clubEventUpdates": {
+          "type": "boolean",
+          "description": "Notify about schedule changes, cancellations, or announcements from followed clubs."
+        },
+        "schoolAnnouncements": {
+          "type": "boolean",
+          "description": "Receive school-wide campus announcements."
+        },
+        "importantNotices": {
+          "type": "boolean",
+          "description": "Receive urgent event cancellation or campus notices."
+        },
+        "inAppEnabled": {
+          "type": "boolean",
+          "description": "Deliver notifications in the OnePlace Notification Center."
+        },
+        "pushEnabled": {
+          "type": "boolean",
+          "description": "Deliver opt-in browser push notifications via FCM."
+        },
+        "interestCategories": {
+          "type": "array",
+          "description": "Optional student event interest categories for Discover ranking.",
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "enum": [
+              "STEM & Makers",
+              "Leadership",
+              "Athletics",
+              "Academic",
+              "Arts & Music",
+              "Social & Community"
+            ]
+          }
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest preference save."
+        }
+      },
+      "required": [
+        "uid",
+        "schoolId",
+        "reminder24h",
+        "reminder1h",
+        "clubNewEvents",
+        "clubEventUpdates",
+        "schoolAnnouncements",
+        "importantNotices",
+        "inAppEnabled",
+        "pushEnabled",
+        "interestCategories",
+        "updatedAt"
+      ]
+    },
+    "DeviceToken": {
+      "title": "DeviceToken",
+      "description": "Opt-in Firebase Cloud Messaging browser token registered by a signed-in user.",
+      "type": "object",
+      "properties": {
+        "tokenId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "token": {
+          "type": "string",
+          "description": "FCM browser registration token.",
+          "minLength": 16,
+          "maxLength": 512
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["web"],
+          "description": "Client platform type."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether push delivery to this browser device is enabled."
+        },
+        "permissionState": {
+          "type": "string",
+          "enum": ["granted", "denied", "default", "unsupported"],
+          "description": "Last known browser notification permission state."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastRefreshedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "tokenId",
+        "uid",
+        "schoolId",
+        "token",
+        "platform",
+        "enabled",
+        "permissionState",
+        "createdAt",
+        "updatedAt",
+        "lastRefreshedAt"
+      ]
+    },
+    "NotificationJob": {
+      "title": "NotificationJob",
+      "description": "Server-only notification dispatch, reminder deduplication, and batch delivery log.",
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "jobType": {
+          "type": "string",
+          "enum": [
+            "event_published",
+            "event_updated",
+            "event_cancelled",
+            "club_announcement",
+            "school_announcement",
+            "reminder_24h",
+            "reminder_1h"
+          ]
+        },
+        "entityType": {
+          "type": "string",
+          "enum": ["event", "club", "school"]
+        },
+        "entityId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "dedupKey": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "status": {
+          "type": "string",
+          "enum": ["processing", "completed", "failed"]
+        },
+        "recipientCount": {
+          "type": "integer"
+        },
+        "pushSentCount": {
+          "type": "integer"
+        },
+        "attempts": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "processedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastError": {
+          "type": "string",
+          "maxLength": 300
+        }
+      },
+      "required": ["jobId", "schoolId", "jobType", "entityType", "entityId", "dedupKey", "status", "createdAt"]
+    },
+    "SchoolAnnouncement": {
+      "title": "SchoolAnnouncement",
+      "description": "Admin-published campus announcement that triggers server-side student notifications.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 380
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["normal", "important"]
+        },
+        "createdBy": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "schoolId", "title", "message", "priority", "createdBy", "createdAt"]
     }
   },
   "firestore": {
@@ -319,13 +950,53 @@
       "schema": { "$ref": "#/entities/Member" },
       "description": "School-scoped RBAC membership documents mapping user UIDs to student, organizer, or admin roles."
     },
+    "/schools/{schoolId}/clubs/{clubId}": {
+      "schema": { "$ref": "#/entities/Club" },
+      "description": "School-scoped student club profiles, metadata, and follower counts."
+    },
+    "/schools/{schoolId}/clubs/{clubId}/members/{uid}": {
+      "schema": { "$ref": "#/entities/ClubMember" },
+      "description": "Club-scoped organizer assignments for a specific club."
+    },
+    "/schools/{schoolId}/clubs/{clubId}/followers/{uid}": {
+      "schema": { "$ref": "#/entities/ClubFollower" },
+      "description": "Club follower records keyed by student Firebase Auth UID."
+    },
+    "/schools/{schoolId}/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/SchoolAnnouncement" },
+      "description": "Admin-published campus-wide announcements."
+    },
+    "/schools/{schoolId}/notificationJobs/{jobId}": {
+      "schema": { "$ref": "#/entities/NotificationJob" },
+      "description": "Backend-only notification job and reminder deduplication records."
+    },
+    "/users/{uid}/followedClubs/{clubId}": {
+      "schema": { "$ref": "#/entities/UserFollowedClub" },
+      "description": "Per-user list of followed clubs and notification preferences."
+    },
+    "/users/{uid}/managedClubs/{clubId}": {
+      "schema": { "$ref": "#/entities/ManagedClubMirror" },
+      "description": "Admin-managed index of clubs an organizer is authorized to manage."
+    },
+    "/users/{uid}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/UserNotification" },
+      "description": "Server-generated in-app notifications scoped strictly to the recipient user."
+    },
+    "/users/{uid}/notificationPreferences/{settingId}": {
+      "schema": { "$ref": "#/entities/NotificationPreferences" },
+      "description": "Per-user notification settings and optional discovery category interests."
+    },
+    "/users/{uid}/deviceTokens/{tokenId}": {
+      "schema": { "$ref": "#/entities/DeviceToken" },
+      "description": "Opt-in browser FCM registration tokens owned by the signed-in user."
+    },
     "/userMemberships/{uid}": {
       "schema": { "$ref": "#/entities/UserMembership" },
       "description": "Admin-maintained role mirror used by Firestore list queries."
     },
     "/events/{eventId}": {
       "schema": { "$ref": "#/entities/Event" },
-      "description": "Campus events created and managed by authorized organizers and administrators."
+      "description": "Campus events linked to real club documents and managed by authorized organizers and administrators."
     },
     "/events/{eventId}/attendees/{attendeeId}": {
       "schema": { "$ref": "#/entities/Attendee" },

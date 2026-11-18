@@ -12,7 +12,16 @@ export type EventStatus = 'draft' | 'published' | 'cancelled';
 
 export type EventVisibility = 'public' | 'school';
 
-export type AppView = 'discover' | 'explore' | 'my-rsvps' | 'profile' | 'organizer';
+export type AppView =
+  | 'discover'
+  | 'explore'
+  | 'clubs'
+  | 'club-profile'
+  | 'my-rsvps'
+  | 'notifications'
+  | 'notification-preferences'
+  | 'profile'
+  | 'organizer';
 
 export interface DemoEventRaw {
   id: string;
@@ -66,6 +75,7 @@ export interface GroupedEvents {
 export interface EventFormValues {
   title: string;
   hostClub: string;
+  clubId?: string;
   category: EventCategory;
   eventDate: string; // YYYY-MM-DD in school timezone
   startTime: string; // HH:mm

@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { CalendarDays, ShieldCheck, Sliders } from 'lucide-react';
+import { CalendarDays, ShieldCheck, Sliders, Users } from 'lucide-react';
 import type { SchoolConfig } from '../../config/school';
 import {
   cancelManagedEvent,
@@ -8,13 +8,18 @@ import {
   publishDraftEvent,
   updateManagedEvent,
 } from '../../services/eventService';
+import type { Club } from '../../types/club';
 import type { EventFormValues, SchoolEvent } from '../../types/event';
 import type { MembershipCapabilities, SchoolMembership } from '../../types/membership';
+import { getAuthorizedClubsForEventForm } from '../../utils/clubValidation';
+import { ClubManagementView } from '../clubs/ClubManagementView';
 import { AdminManagementPanel } from './AdminManagementPanel';
 import { CancelEventModal } from './CancelEventModal';
 import { EventForm } from './EventForm';
 import { OrganizerEventList } from './OrganizerEventList';
 import { OrganizerOverview } from './OrganizerOverview';
+
+export type OrganizerStudioTab = 'events' | 'clubs' | 'admin';
 
 interface OrganizerDashboardProps {
   user: User;
@@ -22,7 +27,12 @@ interface OrganizerDashboardProps {
   capabilities: MembershipCapabilities;
   schoolConfig: SchoolConfig;
   managedEvents: SchoolEvent[];
+  allManagedClubs: Club[];
+  allDiscoverClubs: Club[];
+  managedClubIds: ReadonlySet<string>;
+  initialTab?: OrganizerStudioTab;
   onSelectEvent: (event: SchoolEvent) => void;
+  onViewClubProfile: (club: Club) => void;
   onViewPublishedFeed: () => void;
   onSchoolConfigUpdated: () => Promise<void>;
   onShowToast: (type: 'error' | 'success', message: string) => void;
@@ -34,12 +44,17 @@ export function OrganizerDashboard({
   capabilities,
   schoolConfig,
   managedEvents,
+  allManagedClubs,
+  allDiscoverClubs,
+  managedClubIds,
+  initialTab = 'events',
   onSelectEvent,
+  onViewClubProfile,
   onViewPublishedFeed,
   onSchoolConfigUpdated,
   onShowToast,
 }: OrganizerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'events' | 'admin'>('events');
+  const [activeTab, setActiveTab] = useState<OrganizerStudioTab>(initialTab);
   const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create');
   const [editingEvent, setEditingEvent] = useState<SchoolEvent | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -51,6 +66,17 @@ export function OrganizerDashboard({
   const [busyEventId, setBusyEventId] = useState<string | null>(null);
 
   const eventListRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  const isAdmin = capabilities.canManageAllSchoolEvents;
+
+  const authorizedClubs = useMemo(
+    () => getAuthorizedClubsForEventForm(allManagedClubs, membership, managedClubIds),
+    [allManagedClubs, membership, managedClubIds]
+  );
 
   const openCreateModal = () => {
     setEditorMode('create');
@@ -107,6 +133,17 @@ export function OrganizerDashboard({
   };
 
   const handlePublishDraft = async (event: SchoolEvent) => {
+    const matchedClub = (isAdmin ? allManagedClubs : allDiscoverClubs).find(
+      (c) => c.id === event.clubId
+    );
+    if (matchedClub && matchedClub.status !== 'active') {
+      onShowToast(
+        'error',
+        `"${matchedClub.name}" is suspended. Reactivate the club before publishing events.`
+      );
+      return;
+    }
+
     setBusyEventId(event.id);
     try {
       await publishDraftEvent(event);
@@ -138,8 +175,6 @@ export function OrganizerDashboard({
     }, 40);
   };
 
-  const isAdmin = capabilities.canManageAllSchoolEvents;
-
   return (
     <div className="space-y-7">
       {/* Workspace Header */}
@@ -158,32 +193,47 @@ export function OrganizerDashboard({
               Organizer Studio
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-[#737373]">
-              Create, publish, and manage campus club events. Times displayed in{' '}
+              Create events, manage campus clubs, and coordinate community updates. Times displayed in{' '}
               <span className="font-mono text-[#171717]">{schoolConfig.timezone}</span>.
             </p>
           </div>
 
-          {capabilities.canManageRoles && (
-            <div
-              className="flex w-fit items-center gap-1 rounded-full border border-[#E5E7EB] bg-[#F8F9FA] p-1 shrink-0"
-              role="tablist"
-              aria-label="Organizer studio sections"
+          <div
+            className="flex w-fit flex-wrap items-center gap-1 rounded-full border border-[#E5E7EB] bg-[#F8F9FA] p-1 shrink-0"
+            role="tablist"
+            aria-label="Organizer studio sections"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'events'}
+              onClick={() => setActiveTab('events')}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                activeTab === 'events'
+                  ? 'bg-[#171717] text-white'
+                  : 'text-[#737373] hover:text-[#171717]'
+              }`}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'events'}
-                onClick={() => setActiveTab('events')}
-                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                  activeTab === 'events'
-                    ? 'bg-[#171717] text-white'
-                    : 'text-[#737373] hover:text-[#171717]'
-                }`}
-              >
-                <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Events</span>
-              </button>
+              <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Events</span>
+            </button>
 
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'clubs'}
+              onClick={() => setActiveTab('clubs')}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                activeTab === 'clubs'
+                  ? 'bg-[#171717] text-white'
+                  : 'text-[#737373] hover:text-[#171717]'
+              }`}
+            >
+              <Users className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Clubs</span>
+            </button>
+
+            {capabilities.canManageRoles && (
               <button
                 type="button"
                 role="tab"
@@ -198,8 +248,8 @@ export function OrganizerDashboard({
                 <Sliders className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Admin &amp; Roles</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </section>
 
@@ -208,6 +258,16 @@ export function OrganizerDashboard({
           schoolConfig={schoolConfig}
           currentAdminUid={user.uid}
           onSchoolConfigUpdated={onSchoolConfigUpdated}
+          onShowToast={onShowToast}
+        />
+      ) : activeTab === 'clubs' ? (
+        <ClubManagementView
+          schoolConfig={schoolConfig}
+          currentUid={user.uid}
+          isAdmin={isAdmin}
+          clubs={allManagedClubs}
+          events={managedEvents}
+          onViewClubProfile={onViewClubProfile}
           onShowToast={onShowToast}
         />
       ) : (
@@ -240,6 +300,8 @@ export function OrganizerDashboard({
         mode={editorMode}
         initialEvent={editingEvent}
         schoolTimezone={schoolConfig.timezone}
+        authorizedClubs={authorizedClubs}
+        allSchoolClubs={isAdmin ? allManagedClubs : allDiscoverClubs}
         isSubmitting={isSubmittingForm}
         submitError={formError}
         onSubmit={handleSubmitForm}

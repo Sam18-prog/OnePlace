@@ -219,11 +219,16 @@ export function filterEvents(
   query: string,
   bucketFilter: TimeframeBucket | 'all' = 'all',
   now: Date = new Date(),
-  categoryFilter: EventCategory | 'all' = 'all'
+  categoryFilter: EventCategory | 'all' = 'all',
+  clubIdFilter: string = 'all'
 ): SchoolEvent[] {
   const normalizedQuery = query.trim().toLowerCase();
 
   return sortEventsAscending(events).filter((event) => {
+    if (clubIdFilter !== 'all' && event.clubId !== clubIdFilter) {
+      return false;
+    }
+
     if (bucketFilter !== 'all' && getTimeframeBucket(event.startAt, now) !== bucketFilter) {
       return false;
     }

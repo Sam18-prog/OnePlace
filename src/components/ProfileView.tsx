@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
+  Bell,
   BookmarkCheck,
   Check,
   ChevronRight,
@@ -9,23 +10,33 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
+  Settings,
   ShieldCheck,
   User as UserIcon,
+  Users,
 } from 'lucide-react';
-import type { SchoolEvent } from '../types/event';
+import type { EventCategory, SchoolEvent } from '../types/event';
 import type { MembershipCapabilities, SchoolMembership } from '../types/membership';
 import { formatEventTimeOnly, getDateTileParts } from '../utils/events';
+import { InterestSelector } from './personalization/InterestSelector';
 
 interface ProfileViewProps {
   user: User | null;
   events: SchoolEvent[];
   rsvpCount: number;
+  followedClubsCount?: number;
+  unreadNotificationCount?: number;
+  selectedInterests?: EventCategory[];
+  onToggleInterest?: (category: EventCategory) => void;
   membership: SchoolMembership | null;
   capabilities: MembershipCapabilities;
   getEffectiveRsvp: (event: SchoolEvent) => { rsvpCount: number; isGoing: boolean };
   onSignIn: () => void;
   onSignOut: () => void;
   onOpenMyEvents: () => void;
+  onOpenClubs?: () => void;
+  onOpenNotifications?: () => void;
+  onOpenNotificationPreferences?: () => void;
   onOpenOrganizer: () => void;
   onSelectEvent: (event: SchoolEvent) => void;
   onExplore: () => void;
@@ -35,12 +46,19 @@ export function ProfileView({
   user,
   events,
   rsvpCount,
+  followedClubsCount = 0,
+  unreadNotificationCount = 0,
+  selectedInterests = [],
+  onToggleInterest,
   membership,
   capabilities,
   getEffectiveRsvp,
   onSignIn,
   onSignOut,
   onOpenMyEvents,
+  onOpenClubs,
+  onOpenNotifications,
+  onOpenNotificationPreferences,
   onOpenOrganizer,
   onSelectEvent,
   onExplore,
@@ -165,11 +183,19 @@ export function ProfileView({
         </div>
 
         <div className="mt-5 pt-5 border-t border-[#E5E7EB] flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs text-[#737373]">Active RSVPs</p>
-            <p className="font-mono tabular-nums text-xl font-bold text-[#171717]">
-              {rsvpCount}
-            </p>
+          <div className="flex items-center gap-6">
+            <div>
+              <p className="text-xs text-[#737373]">Active RSVPs</p>
+              <p className="font-mono tabular-nums text-xl font-bold text-[#171717]">
+                {rsvpCount}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-[#737373]">Followed Clubs</p>
+              <p className="font-mono tabular-nums text-xl font-bold text-[#171717]">
+                {followedClubsCount}
+              </p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {capabilities.canAccessOrganizer && (
@@ -180,6 +206,16 @@ export function ProfileView({
               >
                 <LayoutDashboard className="h-4 w-4" aria-hidden="true" />
                 <span>Organizer Studio</span>
+              </button>
+            )}
+            {onOpenClubs && (
+              <button
+                type="button"
+                onClick={onOpenClubs}
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-[#F8F9FA] px-4 py-2 text-xs font-semibold text-[#171717] hover:bg-[#E5E7EB]/50 transition-colors cursor-pointer"
+              >
+                <Users className="h-4 w-4 text-[#E85D04]" aria-hidden="true" />
+                <span>My Clubs</span>
               </button>
             )}
             <button
@@ -267,6 +303,59 @@ export function ProfileView({
           </div>
         )}
       </div>
+
+      {/* Notifications & Personalization Quick Controls */}
+      {(onOpenNotifications || onOpenNotificationPreferences || onToggleInterest) && (
+        <div className="rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-xs space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-display text-sm font-bold text-[#171717]">
+                Notifications &amp; Discovery
+              </h2>
+              <p className="mt-0.5 text-xs text-[#737373]">
+                Manage event reminders, opt-in browser push alerts, and campus interests.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {onOpenNotifications && (
+                <button
+                  type="button"
+                  onClick={onOpenNotifications}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-[#F8F9FA] px-3 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#E5E7EB]/60 cursor-pointer"
+                >
+                  <Bell className="h-3.5 w-3.5 text-[#E85D04]" aria-hidden="true" />
+                  <span>Inbox</span>
+                  {unreadNotificationCount > 0 && (
+                    <span className="font-mono tabular-nums rounded-full bg-[#E85D04] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      {unreadNotificationCount}
+                    </span>
+                  )}
+                </button>
+              )}
+              {onOpenNotificationPreferences && (
+                <button
+                  type="button"
+                  onClick={onOpenNotificationPreferences}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#F8F9FA] cursor-pointer"
+                >
+                  <Settings className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
+                  <span>Preferences</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {onToggleInterest && (
+            <div className="pt-3 border-t border-[#E5E7EB]">
+              <InterestSelector
+                selectedInterests={selectedInterests}
+                onToggleInterest={onToggleInterest}
+                compact
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       <button
         type="button"

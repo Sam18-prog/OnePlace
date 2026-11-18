@@ -28,6 +28,7 @@ interface EventDetailViewProps {
   isGoing: boolean;
   isSignedIn: boolean;
   onRsvpClick: (event: SchoolEvent) => void;
+  onSelectClubById?: (clubId: string) => void;
   onClose: () => void;
 }
 
@@ -37,6 +38,7 @@ export function EventDetailView({
   isGoing,
   isSignedIn,
   onRsvpClick,
+  onSelectClubById,
   onClose,
 }: EventDetailViewProps) {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -185,7 +187,22 @@ export function EventDetailView({
                     />
                   )}
                   <span className="text-xs font-medium text-[#737373]">
-                    Hosted by {event.hostClub}
+                    Hosted by{' '}
+                    {onSelectClubById ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetClubId = event.clubId;
+                          onClose();
+                          onSelectClubById(targetClubId);
+                        }}
+                        className="font-semibold text-[#171717] hover:text-[#E85D04] hover:underline cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
+                      >
+                        {event.hostClub}
+                      </button>
+                    ) : (
+                      event.hostClub
+                    )}
                   </span>
                 </div>
 

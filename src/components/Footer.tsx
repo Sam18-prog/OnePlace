@@ -3,6 +3,7 @@ import type { AppView } from '../types/event';
 interface FooterProps {
   onNavigate: (view: AppView) => void;
   totalEvents: number;
+  totalClubs?: number;
   canAccessOrganizer?: boolean;
   schoolName?: string;
 }
@@ -10,6 +11,7 @@ interface FooterProps {
 export function Footer({
   onNavigate,
   totalEvents,
+  totalClubs,
   canAccessOrganizer = false,
   schoolName,
 }: FooterProps) {
@@ -45,7 +47,13 @@ export function Footer({
           </div>
           <p className="mt-1.5 text-xs text-[#737373]">
             Everything happening. All in OnePlace. ·{' '}
-            <span className="font-mono tabular-nums">{totalEvents}</span> campus events indexed
+            <span className="font-mono tabular-nums">{totalEvents}</span> campus events
+            {typeof totalClubs === 'number' && (
+              <>
+                {' '}
+                · <span className="font-mono tabular-nums">{totalClubs}</span> clubs
+              </>
+            )}
           </p>
         </div>
 
@@ -66,10 +74,24 @@ export function Footer({
           </button>
           <button
             type="button"
+            onClick={() => onNavigate('clubs')}
+            className="hover:text-[#171717] transition-colors cursor-pointer"
+          >
+            Clubs
+          </button>
+          <button
+            type="button"
             onClick={() => onNavigate('my-rsvps')}
             className="hover:text-[#171717] transition-colors cursor-pointer"
           >
-            My RSVPs
+            My Events
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('notifications')}
+            className="hover:text-[#171717] transition-colors cursor-pointer"
+          >
+            Notifications
           </button>
           {canAccessOrganizer && (
             <button

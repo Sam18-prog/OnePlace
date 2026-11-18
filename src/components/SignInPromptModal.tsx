@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { X } from 'lucide-react';
+import type { Club } from '../types/club';
 import type { SchoolEvent } from '../types/event';
 
 interface SignInPromptModalProps {
   isOpen: boolean;
   event: SchoolEvent | null;
+  club?: Club | null;
   isSigningIn: boolean;
   authError: string | null;
   onConfirmSignIn: () => void;
@@ -15,6 +17,7 @@ interface SignInPromptModalProps {
 export function SignInPromptModal({
   isOpen,
   event,
+  club = null,
   isSigningIn,
   authError,
   onConfirmSignIn,
@@ -106,12 +109,18 @@ export function SignInPromptModal({
           Be part of what's happening.
         </h2>
         <p className="mt-2 text-sm text-[#737373] leading-relaxed">
-          Sign in to RSVP, save events, and stay connected with your campus community.
+          Sign in to RSVP, follow campus clubs, and stay connected with your school community.
           {event && (
             <>
               {' '}
               Your RSVP for <span className="font-semibold text-[#171717]">{event.title}</span>{' '}
               will be tied to your student identity.
+            </>
+          )}
+          {!event && club && (
+            <>
+              {' '}
+              Follow <span className="font-semibold text-[#171717]">{club.name}</span> to track their upcoming meetings and announcements.
             </>
           )}
         </p>

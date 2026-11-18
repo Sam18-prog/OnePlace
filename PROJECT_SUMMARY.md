@@ -94,7 +94,38 @@
 
 ## 5. Verification Status (Latest State)
 
-- **Unit Tests (`npx --yes tsx --test src/utils/events.test.ts src/utils/rsvp.test.ts`)**: **11 / 11 passing** (chronological sorting, timeframe bucketing, filtering, date formatting, `.ics` & Google Calendar URL encoding, optimistic RSVP math, and 5s timeout resolution/rejection).
-- **Build & Typecheck**: `npm run build` (`vite build`) and `npm run lint` (`tsc --noEmit`) pass with zero errors.
-- **Firestore Rules**: Validated with ESLint security-rules plugin and deployed to `ai-studio-7ee14d70-ac45-4044-ba7c-16d294924f7c`.
-- **Headless Browser Verification (`playwright-cli`)**: Verified desktop (`1440×900`) and mobile (`390×844`) rendering, `SignInPromptModal` open/cancel flow, search + timeframe filtering, and 0 console errors/warnings. *(Live Google Sign-In popup auth and authenticated Firestore writes were not executed inside headless Chromium.)*
+- **Unit Tests (`npx --yes tsx --test src/utils/*.test.ts`)**: **39 / 39 passing** across events, clubs, notifications, personalization, RSVPs, and Starter Tier notification derivation.
+- **Build & Typecheck**: `npm run build` (`vite build`) and `npm run lint` (`tsc --noEmit`) pass cleanly with `VITE_FIREBASE_VAPID_KEY` unset.
+- **Firestore Rules**: Validated with ESLint security-rules plugin (`npx eslint firestore.rules`) and preserved intact on `ai-studio-7ee14d70-ac45-4044-ba7c-16d294924f7c`.
+- **Headless Browser Verification (`playwright-cli`)**: Verified desktop (`1440×900`) and mobile (`390×844`) rendering, `0` console errors, `0` registered service workers when VAPID is unconfigured, and clean Discover, Notifications, and mobile Notification Preferences views. *(Live Google Sign-In popup auth and authenticated Firestore writes were not executed inside headless Chromium.)*
+
+---
+
+## 6. Phase 4 Starter Tier Mode vs. Firebase Blaze Upgrade Documentation
+
+OnePlace targets the existing Firebase project **`thermal-surface-rgt36`** (Firestore database **`ai-studio-7ee14d70-ac45-4044-ba7c-16d294924f7c`**). On an **AI Studio Starter Tier** project (no Cloud Billing / Blaze plan, no Web Push VAPID key, and no IAM Admin SDK / Cloud Functions deployment), Phase 4 operates gracefully in **Starter Tier Mode**.
+
+### Operational on AI Studio Starter Tier (Current Default)
+1. **Authentication & Core Campus Workflows**: Google Sign-In, event discovery, organizer event management, club directory, club following, and atomic batch RSVPs continue working with `firestore.rules`.
+2. **In-App Notification Center (`src/hooks/useNotifications.ts`, `src/utils/starterNotifications.ts`)**:
+   - Subscribes to persisted `users/{uid}/notifications` (strictly owner-scoped with `where('recipientUid', '==', uid)` and in-memory descending sort).
+   - Derives real-time, preference-filtered in-app alerts from live Firestore documents while the app is open: campus announcements (`schools/{schoolId}/announcements`), followed club updates and upcoming events (`notificationsEnabled: true`), cancelled RSVPed/followed events, and upcoming 24h/1h RSVP windows.
+   - Supports read/unread filtering, mark read, and mark all read (Firestore batch updates for persisted docs + per-user `localStorage` tracking for derived Starter Tier items).
+3. **Firestore-Backed Notification Preferences (`users/{uid}/notificationPreferences/settings`)**:
+   - Persists reminders (`reminder24h`, `reminder1h`), club alerts (`clubNewEvents`, `clubEventUpdates`), campus announcements (`schoolAnnouncements`, `importantNotices`), in-app inbox toggle (`inAppEnabled`), and personalization interest categories.
+4. **Optional FCM Guard (`src/services/pushService.ts`)**:
+   - `VITE_FIREBASE_VAPID_KEY` is optional. When unset, `firebase/messaging` is never dynamically imported, `firebase-messaging-sw.js` is not registered, `Notification.requestPermission()` is never called, and the UI displays an explicit **Not configured / Push Not Configured** state with no simulated push delivery.
+
+### Backend Features Requiring Firebase Project Upgrade (Blaze Plan)
+1. **Web Push Delivery via FCM (`VITE_FIREBASE_VAPID_KEY`)**:
+   - Generating a Web Push certificate VAPID key pair in **Firebase Console → Project Settings → Cloud Messaging** (blocked on Starter Tier) and setting `VITE_FIREBASE_VAPID_KEY` enables client opt-in permission prompts, `getToken()`, `users/{uid}/deviceTokens/{tokenId}` registration, and background service worker delivery via `/public/firebase-messaging-sw.js`.
+2. **Cloud Functions Event Fan-Out Triggers (`functions/src/index.ts`)**:
+   - `onEventWritten` (cross-user fan-out to followers/attendees when events are published, rescheduled, updated, or cancelled)
+   - `onClubUpdated` (fan-out to club followers on club announcements)
+   - `onSchoolAnnouncementCreated` (fan-out to active school members on new campus announcements)
+3. **Cloud Scheduler Background Jobs (`functions/src/index.ts`, `functions/src/reminders.ts`)**:
+   - `sendScheduledEventReminders` (`every 15 minutes`) for automated 24h and 1h reminders delivered when the user's browser/tab is closed.
+   - `cleanupNotificationArtifacts` (`every sunday 03:00`) for pruning expired notification job logs and stale tokens.
+4. **Admin SDK (`firebase-admin`) Cross-User Writes & Composite Indexes**:
+   - Server-side `firebase-admin` fan-out writes into recipients' `users/{uid}/notifications` subcollections and deploying composite indexes (`firestore.indexes.json`) via Firebase CLI require a Blaze-enabled project with IAM & Cloud Functions permissions.
+
