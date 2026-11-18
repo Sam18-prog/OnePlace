@@ -1,50 +1,252 @@
 {
   "entities": {
-    "Event": {
-      "title": "Event",
-      "description": "A school club meeting or campus event displayed in the OnePlace unified feed.",
+    "School": {
+      "title": "School",
+      "description": "School-level settings and discovery configuration.",
       "type": "object",
       "properties": {
+        "id": {
+          "type": "string",
+          "description": "School identifier matching VITE_SCHOOL_ID.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 2,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Official display name of the school campus.",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA timezone identifier used as default for school events.",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "allowPublicDiscovery": {
+          "type": "boolean",
+          "description": "Whether public events for this school are visible without authentication."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest school configuration update."
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator who last updated school settings.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "name", "timezone", "allowPublicDiscovery", "updatedAt", "updatedBy"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "School-scoped user membership and role assignment record.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the member.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "description": "School identifier this membership belongs to.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "organizer", "admin"],
+          "description": "Authorization role within the school."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended"],
+          "description": "Membership status."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Optional display label for organizer roster management.",
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional member email visible only to the member and school admins.",
+          "maxLength": 160
+        },
+        "assignedBy": {
+          "type": "string",
+          "description": "UID of the administrator who created or updated this membership.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when membership was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when membership was last updated."
+        }
+      },
+      "required": ["uid", "schoolId", "role", "status", "createdAt"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "A school club meeting or campus event stored in Cloud Firestore.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique event identifier matching document ID.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "description": "School identifier owning the event.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
         "title": {
           "type": "string",
           "description": "Display title of the school event.",
-          "minLength": 1,
-          "maxLength": 120
-        },
-        "hostClub": {
-          "type": "string",
-          "description": "Name of the student organization or club hosting the event.",
-          "minLength": 1,
-          "maxLength": 80
-        },
-        "dateTime": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Scheduled start date and time stored as a Firestore Timestamp."
-        },
-        "location": {
-          "type": "string",
-          "description": "Campus room, building, or field where the event takes place.",
-          "minLength": 1,
+          "minLength": 3,
           "maxLength": 120
         },
         "description": {
           "type": "string",
-          "description": "Brief summary of the event details.",
-          "maxLength": 600
+          "description": "Summary of event details.",
+          "maxLength": 1000
+        },
+        "hostClub": {
+          "type": "string",
+          "description": "Name of the student organization or club hosting the event.",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "clubId": {
+          "type": "string",
+          "description": "Normalized slug identifier for the hosting club.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "STEM & Makers",
+            "Leadership",
+            "Athletics",
+            "Academic",
+            "Arts & Music",
+            "Social & Community"
+          ],
+          "description": "Campus event category."
+        },
+        "startAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Scheduled start timestamp stored as Firestore Timestamp."
+        },
+        "endAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Scheduled end timestamp stored as Firestore Timestamp."
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA timezone in which the event was scheduled.",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "location": {
+          "type": "string",
+          "description": "Campus room, building, or field where the event takes place.",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Validated HTTPS cover image URL or curated local asset path.",
+          "maxLength": 500
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the organizer who created the event.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-modified timestamp."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "published", "cancelled"],
+          "description": "Lifecycle status of the event."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "school"],
+          "description": "Audience visibility scope."
         },
         "rsvpCount": {
           "type": "integer",
           "description": "Total number of students who have RSVPed to the event."
+        },
+        "discoverKey": {
+          "type": "string",
+          "description": "Rule-enforced query partition key (public:<schoolId> | school:<schoolId> | draft:<uid>).",
+          "maxLength": 160
+        },
+        "isDemoSeed": {
+          "type": "boolean",
+          "description": "Indicates demo content seeded or migrated by an administrator."
+        },
+        "cancelledAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp recorded when an event was cancelled."
+        },
+        "cancellationReason": {
+          "type": "string",
+          "description": "Optional organizer note explaining why the event was cancelled.",
+          "maxLength": 240
         }
       },
       "required": [
+        "id",
+        "schoolId",
         "title",
-        "hostClub",
-        "dateTime",
-        "location",
         "description",
-        "rsvpCount"
+        "hostClub",
+        "clubId",
+        "category",
+        "startAt",
+        "endAt",
+        "timezone",
+        "location",
+        "createdBy",
+        "createdAt",
+        "updatedAt",
+        "status",
+        "visibility",
+        "rsvpCount",
+        "discoverKey"
       ]
     },
     "Attendee": {
@@ -64,24 +266,70 @@
           "description": "Server timestamp when the student RSVPed."
         }
       },
-      "required": [
-        "uid",
-        "createdAt"
-      ]
+      "required": ["uid", "createdAt"]
+    },
+    "UserMembership": {
+      "title": "UserMembership",
+      "description": "Admin-managed role mirror keyed by UID for index-free and rule-safe Firestore list queries.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the member.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "schoolId": {
+          "type": "string",
+          "description": "School identifier assigned to this user.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "organizer", "admin"],
+          "description": "Authorization role within the school."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended"],
+          "description": "Membership status."
+        },
+        "assignedBy": {
+          "type": "string",
+          "description": "UID of the administrator who updated this record.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest update."
+        }
+      },
+      "required": ["uid", "schoolId", "role", "status", "updatedAt"]
     }
   },
   "firestore": {
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/School" },
+      "description": "Campus-level configuration documents."
+    },
+    "/schools/{schoolId}/members/{uid}": {
+      "schema": { "$ref": "#/entities/Member" },
+      "description": "School-scoped RBAC membership documents mapping user UIDs to student, organizer, or admin roles."
+    },
+    "/userMemberships/{uid}": {
+      "schema": { "$ref": "#/entities/UserMembership" },
+      "description": "Admin-maintained role mirror used by Firestore list queries."
+    },
     "/events/{eventId}": {
-      "schema": {
-        "$ref": "#/entities/Event"
-      },
-      "description": "Collection of high school events synchronized from demo-events.json with live RSVP counts."
+      "schema": { "$ref": "#/entities/Event" },
+      "description": "Campus events created and managed by authorized organizers and administrators."
     },
     "/events/{eventId}/attendees/{attendeeId}": {
-      "schema": {
-        "$ref": "#/entities/Attendee"
-      },
-      "description": "Subcollection tracking individual student RSVPs keyed by their Firebase Auth UID."
+      "schema": { "$ref": "#/entities/Attendee" },
+      "description": "Subcollection tracking individual student RSVPs keyed by Firebase Auth UID."
     }
   }
 }

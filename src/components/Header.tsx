@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
+import { motion } from 'motion/react';
 import {
   BookmarkCheck,
   ChevronDown,
   Compass,
+  LayoutDashboard,
   LogOut,
   RefreshCw,
   Search,
@@ -20,6 +22,7 @@ interface HeaderProps {
   authLoading: boolean;
   isRefreshing: boolean;
   rsvpTotalCount: number;
+  canAccessOrganizer?: boolean;
   onRefresh: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -33,6 +36,7 @@ export function Header({
   authLoading,
   isRefreshing,
   rsvpTotalCount,
+  canAccessOrganizer = false,
   onRefresh,
   onSignIn,
   onSignOut,
@@ -68,12 +72,14 @@ export function Header({
       icon: BookmarkCheck,
       badge: user && rsvpTotalCount > 0 ? rsvpTotalCount : undefined,
     },
+    ...(canAccessOrganizer
+      ? [{ id: 'organizer' as AppView, label: 'Organizer', icon: LayoutDashboard }]
+      : []),
   ];
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#E5E7EB] bg-white">
       <div className="mx-auto flex h-14 md:h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-        {/* Left: Brand Logo & Wordmark */}
         <div className="flex items-center gap-8 shrink-0">
           <button
             type="button"
@@ -85,14 +91,7 @@ export function Header({
               aria-hidden="true"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <rect
-                  x="4"
-                  y="4"
-                  width="7"
-                  height="7"
-                  rx="2"
-                  fill="currentColor"
-                />
+                <rect x="4" y="4" width="7" height="7" rx="2" fill="currentColor" />
                 <rect
                   x="13"
                   y="4"
@@ -102,14 +101,7 @@ export function Header({
                   fill="currentColor"
                   fillOpacity="0.65"
                 />
-                <rect
-                  x="4"
-                  y="13"
-                  width="16"
-                  height="7"
-                  rx="2"
-                  fill="currentColor"
-                />
+                <rect x="4" y="13" width="16" height="7" rx="2" fill="currentColor" />
               </svg>
             </span>
             <span className="font-display text-lg font-extrabold tracking-tight text-[#171717] whitespace-nowrap">
@@ -117,7 +109,6 @@ export function Header({
             </span>
           </button>
 
-          {/* Desktop Center Navigation */}
           <nav className="hidden md:flex items-center gap-1" aria-label="Primary navigation">
             {navItems.map((item) => {
               const isActive = activeView === item.id;
@@ -129,10 +120,18 @@ export function Header({
                   aria-current={isActive ? 'page' : undefined}
                   className={`relative inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04] ${
                     isActive
-                      ? 'bg-[#F8F9FA] text-[#171717]'
-                      : 'text-[#737373] hover:text-[#171717] hover:bg-[#F8F9FA]/70'
+                      ? 'text-[#171717]'
+                      : 'text-[#737373] hover:text-[#171717]'
                   }`}
                 >
+                  {isActive && (
+                    <motion.span
+                      layoutId="desktop-nav-active"
+                      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                      className="absolute inset-0 rounded-lg bg-[#F3F4F6] -z-10"
+                      aria-hidden="true"
+                    />
+                  )}
                   <span>{item.label}</span>
                   {typeof item.badge === 'number' && (
                     <span className="font-mono tabular-nums inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#E85D04]/10 px-1.5 text-[11px] font-semibold text-[#E85D04]">
@@ -145,7 +144,6 @@ export function Header({
           </nav>
         </div>
 
-        {/* Right: Quick Search, Refresh & Account */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           <button
             type="button"
@@ -240,6 +238,32 @@ export function Header({
                       {rsvpTotalCount}
                     </span>
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNavigate('profile');
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors cursor-pointer"
+                  >
+                    <UserIcon className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
+                    Profile
+                  </button>
+                  {canAccessOrganizer && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onNavigate('organizer');
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-[#E85D04] hover:bg-[#E85D04]/10 transition-colors cursor-pointer"
+                    >
+                      <LayoutDashboard className="h-3.5 w-3.5" aria-hidden="true" />
+                      Organizer Studio
+                    </button>
+                  )}
                   <button
                     type="button"
                     role="menuitem"

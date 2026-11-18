@@ -32,23 +32,190 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Validation blueprint for Event documents
-    function isValidEvent(data) {
-      return data.keys().hasAll(['title', 'hostClub', 'dateTime', 'location', 'description', 'rsvpCount'])
-        && data.keys().hasOnly(['title', 'hostClub', 'dateTime', 'location', 'description', 'rsvpCount'])
-        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
-        && data.hostClub is string && data.hostClub.size() >= 1 && data.hostClub.size() <= 80
-        && data.dateTime is timestamp
-        && data.location is string && data.location.size() >= 1 && data.location.size() <= 120
-        && data.description is string && data.description.size() <= 600
-        && data.rsvpCount is int && data.rsvpCount >= 0 && data.rsvpCount <= 100000;
+    // Bootstrapped root administrator (verified email required)
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'sameerkunwar995@gmail.com';
+    }
+
+    // School-scoped RBAC lookups
+    function memberPath(schoolId, uid) {
+      return /databases/$(database)/documents/schools/$(schoolId)/members/$(uid);
+    }
+
+    function userMembershipPath() {
+      return /databases/$(database)/documents/userMemberships/$(request.auth.uid);
+    }
+
+    function hasActiveMemberDoc(schoolId) {
+      return isVerifiedUser()
+        && isValidId(schoolId)
+        && exists(memberPath(schoolId, request.auth.uid))
+        && get(memberPath(schoolId, request.auth.uid)).data.status == 'active';
+    }
+
+    function isActiveSchoolMember(schoolId) {
+      return isBootstrappedAdmin() || hasActiveMemberDoc(schoolId);
+    }
+
+    function isActiveOrganizer(schoolId) {
+      return isBootstrappedAdmin() || (
+        hasActiveMemberDoc(schoolId)
+        && get(memberPath(schoolId, request.auth.uid)).data.role in ['organizer', 'admin']
+      );
+    }
+
+    function isSchoolAdmin(schoolId) {
+      return isBootstrappedAdmin() || (
+        hasActiveMemberDoc(schoolId)
+        && get(memberPath(schoolId, request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function expectedDiscoverKey(data) {
+      return data.status == 'draft'
+        ? ('draft:' + data.createdBy)
+        : (data.visibility == 'school'
+            ? ('school:' + data.schoolId)
+            : ('public:' + data.schoolId));
+    }
+
+    function isValidCategory(category) {
+      return category in [
+        'STEM & Makers',
+        'Leadership',
+        'Athletics',
+        'Academic',
+        'Arts & Music',
+        'Social & Community'
+      ];
+    }
+
+    function isValidImageUrl(url) {
+      return url is string
+        && url.size() >= 1
+        && url.size() <= 500
+        && (url.matches('^https://.*') || url.matches('^/src/assets/images/.*'));
+    }
+
+    // Validation blueprint for School settings documents
+    function isValidSchool(data, schoolId) {
+      return data.keys().hasAll(['id', 'name', 'timezone', 'allowPublicDiscovery', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly(['id', 'name', 'timezone', 'allowPublicDiscovery', 'updatedAt', 'updatedBy'])
+        && isValidId(data.id)
+        && data.id == schoolId
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
+        && data.timezone is string && data.timezone.size() >= 2 && data.timezone.size() <= 64
+        && data.allowPublicDiscovery is bool
+        && data.updatedAt is timestamp
+        && isValidId(data.updatedBy);
+    }
+
+    // Validation blueprint for School Member documents
+    function isValidMember(data, schoolId, uid) {
+      return data.keys().hasAll(['uid', 'schoolId', 'role', 'status', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'schoolId', 'role', 'status', 'displayName', 'email', 'assignedBy', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == uid
+        && isValidId(data.schoolId)
+        && data.schoolId == schoolId
+        && data.role in ['student', 'organizer', 'admin']
+        && data.status in ['active', 'suspended']
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+        && (!('assignedBy' in data) || isValidId(data.assignedBy))
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidUserMembership(data, uid) {
+      return data.keys().hasAll(['uid', 'schoolId', 'role', 'status', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'schoolId', 'role', 'status', 'assignedBy', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == uid
+        && isValidId(data.schoolId)
+        && data.role in ['student', 'organizer', 'admin']
+        && data.status in ['active', 'suspended']
+        && (!('assignedBy' in data) || isValidId(data.assignedBy))
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation blueprint for Phase 2 Event documents
+    function isValidEvent(data, eventId) {
+      return data.keys().hasAll([
+          'id',
+          'schoolId',
+          'title',
+          'description',
+          'hostClub',
+          'clubId',
+          'category',
+          'startAt',
+          'endAt',
+          'timezone',
+          'location',
+          'createdBy',
+          'createdAt',
+          'updatedAt',
+          'status',
+          'visibility',
+          'rsvpCount',
+          'discoverKey'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'schoolId',
+          'title',
+          'description',
+          'hostClub',
+          'clubId',
+          'category',
+          'startAt',
+          'endAt',
+          'timezone',
+          'location',
+          'imageUrl',
+          'createdBy',
+          'createdAt',
+          'updatedAt',
+          'status',
+          'visibility',
+          'rsvpCount',
+          'discoverKey',
+          'isDemoSeed',
+          'cancelledAt',
+          'cancellationReason'
+        ])
+        && isValidId(data.id)
+        && data.id == eventId
+        && isValidId(data.schoolId)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 120
+        && data.description is string && data.description.size() <= 1000
+        && (data.status != 'published' || data.description.size() >= 10)
+        && data.hostClub is string && data.hostClub.size() >= 2 && data.hostClub.size() <= 80
+        && data.clubId is string && data.clubId.size() >= 2 && data.clubId.size() <= 80 && data.clubId.matches('^[a-zA-Z0-9_\\-]+$')
+        && isValidCategory(data.category)
+        && data.startAt is timestamp
+        && data.endAt is timestamp
+        && data.endAt > data.startAt
+        && data.timezone is string && data.timezone.size() >= 2 && data.timezone.size() <= 64
+        && data.location is string && data.location.size() >= 2 && data.location.size() <= 120
+        && (!('imageUrl' in data) || isValidImageUrl(data.imageUrl))
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.status in ['draft', 'published', 'cancelled']
+        && data.visibility in ['public', 'school']
+        && data.rsvpCount is int && data.rsvpCount >= 0 && data.rsvpCount <= 100000
+        && data.discoverKey is string && data.discoverKey == expectedDiscoverKey(data)
+        && (!('isDemoSeed' in data) || data.isDemoSeed is bool)
+        && (!('cancelledAt' in data) || data.cancelledAt is timestamp)
+        && (!('cancellationReason' in data) || (data.cancellationReason is string && data.cancellationReason.size() <= 240));
     }
 
     // Validation blueprint for Attendee documents
     function isValidAttendee(data, attendeeId) {
       return data.keys().hasAll(['uid', 'createdAt'])
         && data.keys().hasOnly(['uid', 'createdAt'])
-        && data.uid is string
         && isValidId(data.uid)
         && data.uid == request.auth.uid
         && data.uid == attendeeId
@@ -56,48 +223,210 @@ service cloud.firestore {
         && data.createdAt == request.time;
     }
 
+    // Admin-managed membership mirror for index-free & rule-safe list queries
+    match /userMemberships/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && isOwner(uid);
+      allow list: if false;
+      allow create, update: if isValidId(uid)
+        && isVerifiedUser()
+        && isValidUserMembership(incoming(), uid)
+        && isSchoolAdmin(incoming().schoolId)
+        && incoming().updatedAt == request.time
+        && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid);
+      allow delete: if false;
+    }
+
+    // School configuration and scoped membership collection
+    match /schools/{schoolId} {
+      allow get: if isValidId(schoolId);
+      allow list: if false;
+
+      allow create: if isValidId(schoolId)
+        && isSchoolAdmin(schoolId)
+        && isValidSchool(incoming(), schoolId)
+        && incoming().updatedAt == request.time
+        && incoming().updatedBy == request.auth.uid;
+
+      allow update: if isValidId(schoolId)
+        && isSchoolAdmin(schoolId)
+        && isValidSchool(incoming(), schoolId)
+        && incoming().id == existing().id
+        && incoming().updatedAt == request.time
+        && incoming().updatedBy == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name',
+          'timezone',
+          'allowPublicDiscovery',
+          'updatedAt',
+          'updatedBy'
+        ]);
+
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow get: if isValidId(schoolId)
+          && isValidId(uid)
+          && isSignedIn()
+          && (isOwner(uid) || isSchoolAdmin(schoolId));
+
+        allow list: if isValidId(schoolId) && isSchoolAdmin(schoolId);
+
+        allow create: if isValidId(schoolId)
+          && isValidId(uid)
+          && isSchoolAdmin(schoolId)
+          && isValidMember(incoming(), schoolId, uid)
+          && incoming().createdAt == request.time
+          && (!('updatedAt' in incoming()) || incoming().updatedAt == request.time)
+          && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid);
+
+        allow update: if isValidId(schoolId)
+          && isValidId(uid)
+          && isSchoolAdmin(schoolId)
+          && isValidMember(incoming(), schoolId, uid)
+          && incoming().uid == existing().uid
+          && incoming().schoolId == existing().schoolId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'role',
+            'status',
+            'displayName',
+            'email',
+            'assignedBy',
+            'updatedAt'
+          ]);
+
+        allow delete: if false;
+      }
+    }
+
     // Events collection
     match /events/{eventId} {
-      allow get: if isSignedIn() && isValidId(eventId);
-      allow list: if isSignedIn()
-        && resource.data.title is string
-        && resource.data.rsvpCount is int
-        && resource.data.rsvpCount >= 0;
+      allow get: if isValidId(eventId) && (
+        (existing().visibility == 'public' && existing().status in ['published', 'cancelled'])
+        || (isVerifiedUser()
+          && ('schoolId' in existing())
+          && existing().schoolId is string
+          && existing().status in ['published', 'cancelled']
+          && isActiveSchoolMember(existing().schoolId))
+        || (isVerifiedUser() && ('createdBy' in existing()) && existing().createdBy == request.auth.uid)
+        || (isVerifiedUser() && ('schoolId' in existing()) && existing().schoolId is string && isSchoolAdmin(existing().schoolId))
+        || isBootstrappedAdmin()
+      );
 
-      // Initial seed creation from static demo-events.json by verified signed-in users
+      allow list: if (
+        (resource.data.discoverKey is string
+          && resource.data.discoverKey >= 'public:'
+          && resource.data.discoverKey < 'public;')
+        || (isVerifiedUser()
+          && exists(userMembershipPath())
+          && get(userMembershipPath()).data.status == 'active'
+          && resource.data.discoverKey == ('school:' + get(userMembershipPath()).data.schoolId))
+        || (isVerifiedUser() && resource.data.createdBy == request.auth.uid)
+        || (isVerifiedUser()
+          && exists(userMembershipPath())
+          && get(userMembershipPath()).data.status == 'active'
+          && get(userMembershipPath()).data.role == 'admin'
+          && resource.data.schoolId == get(userMembershipPath()).data.schoolId)
+        || isBootstrappedAdmin()
+      );
+
+      // Event creation strictly limited to active organizers and school administrators
       allow create: if isVerifiedUser()
         && isValidId(eventId)
-        && isValidEvent(incoming())
-        && incoming().rsvpCount >= 0
-        && incoming().rsvpCount <= 1000;
+        && isValidEvent(incoming(), eventId)
+        && isActiveOrganizer(incoming().schoolId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          (incoming().createdBy == request.auth.uid && incoming().rsvpCount == 0)
+          || (isSchoolAdmin(incoming().schoolId)
+              && ('isDemoSeed' in incoming())
+              && incoming().isDemoSeed == true
+              && incoming().rsvpCount >= 0
+              && incoming().rsvpCount <= 1000)
+        )
+        && (
+          incoming().status != 'published'
+          || incoming().startAt >= request.time - duration.value(15, 'm')
+          || (isSchoolAdmin(incoming().schoolId) && ('isDemoSeed' in incoming()) && incoming().isDemoSeed == true)
+        );
 
-      // Action-based update: ONLY atomic RSVP increment (+1) or cancel decrement (-1)
+      // Action-based update: (1) Student atomic RSVP, (2) Organizer/Admin edit, (3) Admin migration of legacy doc
       allow update: if isVerifiedUser()
         && isValidId(eventId)
-        && isValidEvent(incoming())
-        && incoming().title == existing().title
-        && incoming().hostClub == existing().hostClub
-        && incoming().dateTime == existing().dateTime
-        && incoming().location == existing().location
-        && incoming().description == existing().description
-        && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpCount'])
+        && isValidEvent(incoming(), eventId)
         && (
-          // Action: RSVP (+1 paired atomically with creating own attendee record)
+          // Action 1: Atomic RSVP (+1 on published, -1 on published or cancelled)
           (
-            incoming().rsvpCount == existing().rsvpCount + 1
-            && !exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
-            && existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+            ('schoolId' in existing())
+            && (existing().visibility == 'public' || isActiveSchoolMember(existing().schoolId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpCount'])
+            && (
+              (
+                existing().status == 'published'
+                && incoming().rsvpCount == existing().rsvpCount + 1
+                && !exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+                && existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+              )
+              || (
+                existing().status in ['published', 'cancelled']
+                && incoming().rsvpCount == existing().rsvpCount - 1
+                && existing().rsvpCount >= 1
+                && exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+                && !existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+              )
+            )
           )
           ||
-          // Action: Cancel RSVP (-1 paired atomically with deleting own attendee record)
+          // Action 2: Authorized Organizer (own events) or School Admin (all school events) edits/lifecycle
           (
-            incoming().rsvpCount == existing().rsvpCount - 1
-            && existing().rsvpCount >= 1
-            && exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
-            && !existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+            ('schoolId' in existing())
+            && (isSchoolAdmin(existing().schoolId) || (isActiveOrganizer(existing().schoolId) && existing().createdBy == request.auth.uid))
+            && incoming().id == existing().id
+            && incoming().schoolId == existing().schoolId
+            && incoming().createdBy == existing().createdBy
+            && incoming().createdAt == existing().createdAt
+            && incoming().rsvpCount == existing().rsvpCount
+            && incoming().updatedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'title',
+              'description',
+              'hostClub',
+              'clubId',
+              'category',
+              'startAt',
+              'endAt',
+              'timezone',
+              'location',
+              'imageUrl',
+              'updatedAt',
+              'status',
+              'visibility',
+              'discoverKey',
+              'cancelledAt',
+              'cancellationReason'
+            ])
+            && (existing().status != 'cancelled' || isSchoolAdmin(existing().schoolId) || incoming().status == 'cancelled')
+            && (
+              incoming().status != 'published'
+              || existing().status == 'published'
+              || incoming().startAt >= request.time - duration.value(15, 'm')
+              || isSchoolAdmin(existing().schoolId)
+            )
+          )
+          ||
+          // Action 3: Controlled Admin Migration of legacy Phase 1 documents (preserves rsvpCount & attendees)
+          (
+            !('schoolId' in existing())
+            && isSchoolAdmin(incoming().schoolId)
+            && incoming().rsvpCount == existing().rsvpCount
+            && incoming().updatedAt == request.time
           )
         );
 
+      // Soft cancellation only; arbitrary deletion from client is prohibited
       allow delete: if false;
 
       // Attendees subcollection (keyed by student UID)
@@ -111,24 +440,30 @@ service cloud.firestore {
         // Deny listing all attendees to prevent student enumeration
         allow list: if false;
 
-        // Action: Create own RSVP record atomically with parent rsvpCount + 1
+        // Action: Create own RSVP record atomically with parent rsvpCount + 1 (published events only)
         allow create: if isVerifiedUser()
           && isValidId(eventId)
           && isValidId(attendeeId)
           && isOwner(attendeeId)
           && isValidAttendee(incoming(), attendeeId)
           && exists(/databases/$(database)/documents/events/$(eventId))
+          && get(/databases/$(database)/documents/events/$(eventId)).data.status == 'published'
+          && (
+            get(/databases/$(database)/documents/events/$(eventId)).data.visibility == 'public'
+            || isActiveSchoolMember(get(/databases/$(database)/documents/events/$(eventId)).data.schoolId)
+          )
           && getAfter(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount
             == get(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount + 1;
 
         allow update: if false;
 
-        // Action: Delete own RSVP record atomically with parent rsvpCount - 1
+        // Action: Delete own RSVP record atomically with parent rsvpCount - 1 (published or cancelled)
         allow delete: if isVerifiedUser()
           && isValidId(eventId)
           && isValidId(attendeeId)
           && isOwner(attendeeId)
           && exists(/databases/$(database)/documents/events/$(eventId))
+          && get(/databases/$(database)/documents/events/$(eventId)).data.status in ['published', 'cancelled']
           && getAfter(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount
             == get(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount - 1;
       }

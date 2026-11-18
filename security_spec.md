@@ -1,22 +1,38 @@
-# Security Specification: OnePlace Event Feed & RSVP
+# Security Specification: OnePlace Event Management, RBAC & RSVP
 
 ## 1. Data Invariants
-1. **Event Schema Integrity**: Every `/events/{eventId}` document must contain exact keys `['title', 'hostClub', 'dateTime', 'location', 'description', 'rsvpCount']`, bounded string lengths (`title <= 120`, `hostClub <= 80`, `location <= 120`, `description <= 600`), a Firestore `timestamp` for `dateTime`, and a non-negative integer `rsvpCount` (`0..100000`).
-2. **Attendee Identity & Ownership**: Every `/events/{eventId}/attendees/{attendeeId}` document must use `attendeeId == request.auth.uid`, match `incoming().uid == request.auth.uid`, and set `createdAt == request.time`.
-3. **Atomic RSVP Synchronization**: Incrementing `rsvpCount` by `+1` on `/events/{eventId}` is permitted ONLY in an atomic batch that creates `/events/{eventId}/attendees/{request.auth.uid}` (and vice versa `-1` when deleting). Unauthenticated users and unverified emails cannot mutate state.
-4. **No Attendee Scraping / PII Isolation**: Listing `/events/{eventId}/attendees` is strictly denied; a student can only read (`get`) their own `/attendees/{uid}` document.
-5. **Path Hardening**: All `eventId` and `attendeeId` path variables must satisfy `isValidId(id)` (`^[a-zA-Z0-9_-]+$`, `<= 128` chars).
+1. **School-Scoped Role Integrity (`/schools/{schoolId}/members/{uid}`)**: Only verified School Administrators (or the bootstrapped root administrator) may create or update membership records. Ordinary users and organizers cannot grant themselves elevated roles, activate suspended memberships, or read other members' PII (`email`).
+2. **Event Schema & Lifecycle Integrity (`/events/{eventId}`)**:
+   - Every event must include required fields (`id`, `schoolId`, `title`, `description`, `hostClub`, `clubId`, `category`, `startAt`, `endAt`, `timezone`, `location`, `createdBy`, `createdAt`, `updatedAt`, `status`, `visibility`, `rsvpCount`, `discoverKey`) with bounded sizes and strict enum checks.
+   - `endAt` must be strictly greater than `startAt`.
+   - `createdAt` and `updatedAt` must match `request.time` on creation; `updatedAt` must match `request.time` on edits; `id`, `schoolId`, `createdBy`, and `createdAt` are immutable after creation.
+   - `discoverKey` is deterministically bound to `status`, `visibility`, `schoolId`, and `createdBy` so public, school-only, and draft queries cannot bleed across authorization boundaries.
+3. **Organizer & Admin Ownership**:
+   - Only active `organizer` or `admin` members for `schoolId` may create events.
+   - Organizers may only edit, publish, or cancel events where `existing().createdBy == request.auth.uid`.
+   - School Admins may manage all events in their `schoolId` and migrate legacy Phase 1 documents without overwriting `rsvpCount` or deleting `/attendees`.
+   - Neither organizers nor admins may alter `rsvpCount` via event editing.
+   - Hard deletion (`delete`) on `/events` is disabled; events are soft-cancelled (`status: 'cancelled'`).
+4. **Visibility & Draft Protection**:
+   - Unauthenticated visitors may only read (`get` / `list`) `published` or `cancelled` events with `visibility == 'public'`.
+   - `visibility == 'school'` events require active school membership (`schools/{schoolId}/members/{uid}.status == 'active'` or bootstrapped admin).
+   - `draft` events are readable only by their `createdBy` organizer or a School Admin.
+5. **Atomic RSVP Synchronization (`/events/{eventId}/attendees/{attendeeId}`)**:
+   - RSVPs are allowed only for `published` events (`status == 'published'`) that the verified user is allowed to view (`visibility == 'public'` or active school member).
+   - Cancelled and draft events cannot accept new RSVPs.
+   - Incrementing `rsvpCount` by `+1` requires an atomic batch creating `/events/{eventId}/attendees/{request.auth.uid}` (`uid == request.auth.uid`, `createdAt == request.time`). Decrementing `-1` requires atomically deleting that same document.
+   - Listing `/events/{eventId}/attendees` is strictly denied to prevent student enumeration.
 
-## 2. "Dirty Dozen" Adversarial Payloads (Must All Be Denied)
-1. **Unauthenticated RSVP Write**: Anonymous/signed-out request creates `/events/evt-robotics/attendees/user-1`. -> DENIED.
-2. **Unverified Email Write**: Signed-in user with `email_verified: false` attempts to RSVP or seed an event. -> DENIED.
-3. **Identity Spoofing on Attendee Create**: User A (`uid: "alice"`) tries to create `/events/evt-robotics/attendees/bob` with `uid: "bob"`. -> DENIED.
-4. **Mismatched Internal UID**: User A (`uid: "alice"`) creates `/events/evt-robotics/attendees/alice` with body `{ uid: "bob", createdAt: request.time }`. -> DENIED.
-5. **Shadow Field Injection on Event**: Signed-in user creates `/events/evt-1` with an extra ghost field `{ ..., isOfficial: true }`. -> DENIED.
-6. **Shadow Field Injection on Attendee**: Signed-in user creates attendee with `{ uid: "alice", createdAt: request.time, role: "admin" }`. -> DENIED.
-7. **Arbitrary RSVP Count Inflation**: Signed-in user updates `/events/evt-robotics` setting `rsvpCount: 9999` without an atomic attendee write. -> DENIED.
-8. **Orphaned Attendee Write (No Batch Count Sync)**: User creates `/events/evt-robotics/attendees/alice` standalone without incrementing parent `rsvpCount`. -> DENIED.
-9. **Event Metadata Tampering via Update**: Signed-in user updates `title` or `location` on an existing `/events/evt-robotics` document. -> DENIED.
-10. **Client-Spoofed Timestamp**: User creates attendee with a client-supplied past/future `createdAt` instead of `request.time`. -> DENIED.
-11. **Resource Exhaustion / ID Poisoning**: User creates `/events/aaaa...(200 chars)` or injects a 1MB `description`. -> DENIED.
-12. **Attendee List Scraping**: Signed-in user attempts to `list` `/events/evt-robotics/attendees` to enumerate all student attendees. -> DENIED.
+## 2. Adversarial Payloads (Must All Be Denied)
+1. **Unauthenticated RSVP Write**: Signed-out request creates `/events/evt-1/attendees/user-1`. -> DENIED.
+2. **Unverified Email Write**: Signed-in user with `email_verified: false` creates an event or RSVP. -> DENIED.
+3. **Self-Role Escalation**: Student writes `/schools/oakridge-high/members/{uid}` with `{ role: "organizer", status: "active" }`. -> DENIED.
+4. **Suspended Organizer Write**: Member with `role: "organizer"` and `status: "suspended"` creates or edits an event. -> DENIED.
+5. **Cross-Organizer Tampering**: Organizer A updates or cancels an event where `createdBy == "organizer-b"`. -> DENIED.
+6. **Organizer RSVP Count Manipulation**: Organizer edits own event with `rsvpCount: 500` in the payload. -> DENIED.
+7. **Draft Leakage to Public/Students**: Unauthenticated user or student queries or gets a `draft` event authored by someone else. -> DENIED.
+8. **School-Only Event Leakage**: Unauthenticated visitor or non-member reads a `visibility: "school"` event. -> DENIED.
+9. **RSVP to Cancelled or Draft Event**: Verified student attempts an atomic RSVP write on a `cancelled` or `draft` event. -> DENIED.
+10. **Attendee List Scraping & PII Exposure**: Student attempts to `list` `/events/evt-1/attendees` or `list` `/schools/oakridge-high/members`. -> DENIED.
+11. **Shadow Field Injection / Client Timestamp Spoofing**: Organizer creates an event with extra ghost key `{ isFeatured: true }` or `createdAt` in the past (`!= request.time`), or sets `discoverKey: "public:..."` on a `draft`. -> DENIED.
+12. **Past Date Publishing / Invalid Time Range**: Organizer publishes an event with `endAt <= startAt` or `startAt` days in the past, or updates `cancelled -> published` without admin permission. -> DENIED.

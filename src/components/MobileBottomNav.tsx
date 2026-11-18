@@ -1,4 +1,4 @@
-import { BookmarkCheck, Compass, Home, User } from 'lucide-react';
+import { BookmarkCheck, Compass, Home, LayoutDashboard, User } from 'lucide-react';
 import type { AppView } from '../types/event';
 
 interface MobileBottomNavProps {
@@ -6,6 +6,7 @@ interface MobileBottomNavProps {
   onNavigate: (view: AppView) => void;
   rsvpCount: number;
   isSignedIn: boolean;
+  canAccessOrganizer?: boolean;
 }
 
 export function MobileBottomNav({
@@ -13,13 +14,17 @@ export function MobileBottomNav({
   onNavigate,
   rsvpCount,
   isSignedIn,
+  canAccessOrganizer = false,
 }: MobileBottomNavProps) {
   const items: { id: AppView; label: string; icon: typeof Home; badge?: number }[] = [
     { id: 'discover', label: 'Home', icon: Home },
     { id: 'explore', label: 'Explore', icon: Compass },
+    ...(canAccessOrganizer
+      ? [{ id: 'organizer' as AppView, label: 'Manage', icon: LayoutDashboard }]
+      : []),
     {
       id: 'my-rsvps',
-      label: 'My Events',
+      label: canAccessOrganizer ? 'Saved' : 'My Events',
       icon: BookmarkCheck,
       badge: isSignedIn && rsvpCount > 0 ? rsvpCount : undefined,
     },
@@ -31,7 +36,7 @@ export function MobileBottomNav({
       aria-label="Mobile navigation"
       className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[#E5E7EB] bg-white pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="grid grid-cols-4 h-14">
+      <div className={`grid h-14 ${canAccessOrganizer ? 'grid-cols-5' : 'grid-cols-4'}`}>
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.id;
@@ -41,9 +46,9 @@ export function MobileBottomNav({
               type="button"
               onClick={() => onNavigate(item.id)}
               aria-current={isActive ? 'page' : undefined}
-              className={`relative flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#E85D04] ${
-                isActive ? 'text-[#E85D04]' : 'text-[#737373] hover:text-[#171717]'
-              }`}
+              className={`relative flex flex-col items-center justify-center gap-0.5 font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#E85D04] ${
+                canAccessOrganizer ? 'text-[10px]' : 'text-[11px]'
+              } ${isActive ? 'text-[#E85D04]' : 'text-[#737373] hover:text-[#171717]'}`}
             >
               <span className="relative inline-flex items-center justify-center">
                 <Icon className="h-5 w-5" strokeWidth={isActive ? 2.25 : 1.75} aria-hidden="true" />
@@ -53,7 +58,7 @@ export function MobileBottomNav({
                   </span>
                 )}
               </span>
-              <span className="leading-none">{item.label}</span>
+              <span className="leading-none truncate max-w-full px-1">{item.label}</span>
             </button>
           );
         })}

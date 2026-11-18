@@ -7,12 +7,21 @@ interface EventImageProps {
   eventId: string;
   title: string;
   category: EventCategory;
+  imageUrl?: string;
+  priority?: boolean;
   className?: string;
 }
 
-export function EventImage({ eventId, title, category, className = '' }: EventImageProps) {
+export function EventImage({
+  eventId,
+  title,
+  category,
+  imageUrl,
+  priority = false,
+  className = '',
+}: EventImageProps) {
   const [hasError, setHasError] = useState(false);
-  const media = getEventMedia(eventId, category);
+  const media = getEventMedia(eventId, category, imageUrl, title);
 
   if (hasError) {
     return (
@@ -32,7 +41,9 @@ export function EventImage({ eventId, title, category, className = '' }: EventIm
       src={media.src}
       alt={media.alt}
       referrerPolicy="no-referrer"
-      loading="lazy"
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
+      fetchPriority={priority ? 'high' : 'auto'}
       onError={() => setHasError(true)}
       className={`object-cover bg-[#F3F4F6] ${className}`}
     />

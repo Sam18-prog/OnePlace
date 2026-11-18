@@ -5,20 +5,21 @@ import type {
   SchoolEvent,
   TimeframeBucket,
 } from '../types/event';
+import { DEFAULT_SCHOOL_ID, DEFAULT_SCHOOL_TIMEZONE } from '../config/school';
+import { isSafeMediaUrl } from './eventMedia';
+import {
+  ALL_EVENT_CATEGORIES,
+  computeDiscoverKey,
+  EVENT_DESC_MAX,
+  EVENT_LOCATION_MAX,
+  EVENT_TITLE_MAX,
+  EVENT_CLUB_MAX,
+  slugifyClubId,
+} from './eventValidation';
 
-const MAX_TITLE_LEN = 120;
-const MAX_CLUB_LEN = 80;
-const MAX_LOCATION_LEN = 120;
-const MAX_DESC_LEN = 600;
 const VALID_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 
-export const EVENT_CATEGORIES: EventCategory[] = [
-  'STEM & Makers',
-  'Leadership',
-  'Athletics',
-  'Academic',
-  'Arts & Music',
-];
+export const EVENT_CATEGORIES: EventCategory[] = ALL_EVENT_CATEGORIES;
 
 export function inferEventCategory(
   event: Pick<SchoolEvent, 'id' | 'title' | 'hostClub'>
@@ -44,6 +45,24 @@ export function inferEventCategory(
     return 'Arts & Music';
   }
   if (
+    haystack.includes('robotics') ||
+    haystack.includes('hackathon') ||
+    haystack.includes('makers') ||
+    haystack.includes('stem') ||
+    haystack.includes('coding')
+  ) {
+    return 'STEM & Makers';
+  }
+  if (
+    haystack.includes('social') ||
+    haystack.includes('mixer') ||
+    haystack.includes('community') ||
+    haystack.includes('spirit') ||
+    haystack.includes('picnic')
+  ) {
+    return 'Social & Community';
+  }
+  if (
     haystack.includes('council') ||
     haystack.includes('student body') ||
     haystack.includes('leadership') ||
@@ -67,10 +86,17 @@ export function sanitizeId(rawId: string): string {
   return cleaned.slice(0, 128) || 'event';
 }
 
-export function parseDemoEvents(raw: unknown): SchoolEvent[] {
+export function parseDemoEvents(
+  raw: unknown,
+  options: { schoolId?: string; timezone?: string; createdBy?: string } = {}
+): SchoolEvent[] {
   if (!Array.isArray(raw)) {
     throw new Error('Invalid events payload: expected an array.');
   }
+
+  const schoolId = options.schoolId ?? DEFAULT_SCHOOL_ID;
+  const timezone = options.timezone ?? DEFAULT_SCHOOL_TIMEZONE;
+  const createdBy = options.createdBy ?? 'school-seed';
 
   const parsed: SchoolEvent[] = [];
 
@@ -87,15 +113,21 @@ export function parseDemoEvents(raw: unknown): SchoolEvent[] {
       continue;
     }
 
-    const date = new Date(candidate.dateTime);
-    if (Number.isNaN(date.getTime())) continue;
+    const startAt = new Date(candidate.dateTime);
+    if (Number.isNaN(startAt.getTime())) continue;
+
+    const endCandidate = candidate.endDateTime ? new Date(candidate.endDateTime) : null;
+    const endAt =
+      endCandidate && !Number.isNaN(endCandidate.getTime()) && endCandidate > startAt
+        ? endCandidate
+        : new Date(startAt.getTime() + 60 * 60 * 1000);
 
     const id = VALID_ID_REGEX.test(candidate.id)
       ? candidate.id.slice(0, 128)
       : sanitizeId(candidate.id);
 
-    const title = candidate.title.trim().slice(0, MAX_TITLE_LEN);
-    const hostClub = candidate.hostClub.trim().slice(0, MAX_CLUB_LEN);
+    const title = candidate.title.trim().slice(0, EVENT_TITLE_MAX);
+    const hostClub = candidate.hostClub.trim().slice(0, EVENT_CLUB_MAX);
 
     const rsvpCount =
       typeof candidate.rsvpCount === 'number' &&
@@ -109,18 +141,38 @@ export function parseDemoEvents(raw: unknown): SchoolEvent[] {
         ? candidate.category
         : inferEventCategory({ id, title, hostClub });
 
+    const imageUrl = isSafeMediaUrl(candidate.imageUrl)
+      ? candidate.imageUrl.trim()
+      : undefined;
+
+    const visibility = candidate.visibility === 'school' ? 'school' : 'public';
+    const status = 'published' as const;
+
     parsed.push({
       id,
+      schoolId,
       title,
       hostClub,
-      dateTime: date,
-      location: candidate.location.trim().slice(0, MAX_LOCATION_LEN),
+      clubId: candidate.clubId ? sanitizeId(candidate.clubId) : slugifyClubId(hostClub),
+      dateTime: startAt,
+      startAt,
+      endAt,
+      timezone,
+      location: candidate.location.trim().slice(0, EVENT_LOCATION_MAX),
       description:
         typeof candidate.description === 'string'
-          ? candidate.description.trim().slice(0, MAX_DESC_LEN)
+          ? candidate.description.trim().slice(0, EVENT_DESC_MAX)
           : '',
       rsvpCount,
       category,
+      createdBy,
+      createdAt: startAt,
+      updatedAt: startAt,
+      status,
+      visibility,
+      discoverKey: computeDiscoverKey(schoolId, status, visibility, createdBy),
+      isDemoSeed: true,
+      ...(imageUrl ? { imageUrl } : {}),
     });
   }
 
@@ -128,7 +180,7 @@ export function parseDemoEvents(raw: unknown): SchoolEvent[] {
 }
 
 export function sortEventsAscending(events: SchoolEvent[]): SchoolEvent[] {
-  return [...events].sort((a, b) => a.dateTime.getTime() - b.dateTime.getTime());
+  return [...events].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
 }
 
 export function getTimeframeBucket(eventDate: Date, now: Date = new Date()): TimeframeBucket {
@@ -139,13 +191,11 @@ export function getTimeframeBucket(eventDate: Date, now: Date = new Date()): Tim
     return 'today';
   }
 
-  // Past events from earlier days still belong to the top bucket if present
   if (eventDate.getTime() < startOfToday.getTime()) {
     return 'today';
   }
 
-  // End of current week (Sunday 23:59:59.999)
-  const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ...
+  const dayOfWeek = now.getDay();
   const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
   const endOfWeek = new Date(
     now.getFullYear(),
@@ -174,7 +224,7 @@ export function filterEvents(
   const normalizedQuery = query.trim().toLowerCase();
 
   return sortEventsAscending(events).filter((event) => {
-    if (bucketFilter !== 'all' && getTimeframeBucket(event.dateTime, now) !== bucketFilter) {
+    if (bucketFilter !== 'all' && getTimeframeBucket(event.startAt, now) !== bucketFilter) {
       return false;
     }
 
@@ -193,6 +243,21 @@ export function filterEvents(
   });
 }
 
+export function getCategoryCounts(events: SchoolEvent[]): Record<EventCategory, number> {
+  const counts: Record<EventCategory, number> = {
+    'STEM & Makers': 0,
+    Leadership: 0,
+    Athletics: 0,
+    Academic: 0,
+    'Arts & Music': 0,
+    'Social & Community': 0,
+  };
+  for (const event of events) {
+    counts[event.category] = (counts[event.category] || 0) + 1;
+  }
+  return counts;
+}
+
 export interface MyEventsPartition {
   attending: SchoolEvent[];
   upcoming: SchoolEvent[];
@@ -208,10 +273,69 @@ export function splitMyEvents(
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
 
   const attending = sorted.filter((event) => Boolean(attendingById[event.id]));
-  const upcoming = sorted.filter((event) => event.dateTime.getTime() >= startOfToday.getTime());
-  const past = sorted.filter((event) => event.dateTime.getTime() < startOfToday.getTime());
+  const upcoming = sorted.filter((event) => event.startAt.getTime() >= startOfToday.getTime());
+  const past = sorted.filter((event) => event.startAt.getTime() < startOfToday.getTime());
 
   return { attending, upcoming, past };
+}
+
+export interface DateGroup {
+  dateKey: string;
+  label: string;
+  events: SchoolEvent[];
+}
+
+export function groupEventsByDate(
+  events: SchoolEvent[],
+  now: Date = new Date()
+): DateGroup[] {
+  const sorted = sortEventsAscending(events);
+  const groups = new Map<string, DateGroup>();
+
+  for (const event of sorted) {
+    const d = event.startAt;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate()
+    ).padStart(2, '0')}`;
+
+    if (!groups.has(key)) {
+      const isToday =
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate();
+
+      const formatted = new Intl.DateTimeFormat('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      }).format(d);
+
+      groups.set(key, {
+        dateKey: key,
+        label: isToday ? `Today · ${formatted}` : formatted,
+        events: [],
+      });
+    }
+
+    groups.get(key)!.events.push(event);
+  }
+
+  return Array.from(groups.values());
+}
+
+export function getDateTileParts(date: Date, timeZone?: string): {
+  month: string;
+  day: string;
+  weekday: string;
+} {
+  const opts = timeZone ? { timeZone } : undefined;
+  return {
+    month: new Intl.DateTimeFormat('en-US', { ...opts, month: 'short' })
+      .format(date)
+      .toUpperCase(),
+    day: new Intl.DateTimeFormat('en-US', { ...opts, day: 'numeric' }).format(date),
+    weekday: new Intl.DateTimeFormat('en-US', { ...opts, weekday: 'short' }).format(date),
+  };
 }
 
 const BUCKET_LABELS: Record<TimeframeBucket, string> = {
@@ -232,7 +356,7 @@ export function groupEventsByTimeframe(
   };
 
   for (const event of sorted) {
-    const bucket = getTimeframeBucket(event.dateTime, now);
+    const bucket = getTimeframeBucket(event.startAt, now);
     buckets[bucket].push(event);
   }
 
@@ -246,12 +370,13 @@ export function groupEventsByTimeframe(
     }));
 }
 
-export function formatEventDateTime(date: Date, now: Date = new Date()): string {
+export function formatEventDateTime(
+  date: Date,
+  now: Date = new Date(),
+  timeZone?: string
+): string {
   const bucket = getTimeframeBucket(date, now);
-  const timeStr = new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
+  const timeStr = formatEventTimeOnly(date, timeZone);
 
   if (bucket === 'today') {
     const isSameDay =
@@ -264,6 +389,7 @@ export function formatEventDateTime(date: Date, now: Date = new Date()): string 
   }
 
   const dateStr = new Intl.DateTimeFormat('en-US', {
+    ...(timeZone ? { timeZone } : {}),
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -272,8 +398,9 @@ export function formatEventDateTime(date: Date, now: Date = new Date()): string 
   return `${dateStr} · ${timeStr}`;
 }
 
-export function formatFullEventDate(date: Date): string {
+export function formatFullEventDate(date: Date, timeZone?: string): string {
   return new Intl.DateTimeFormat('en-US', {
+    ...(timeZone ? { timeZone } : {}),
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -281,11 +408,16 @@ export function formatFullEventDate(date: Date): string {
   }).format(date);
 }
 
-export function formatEventTimeOnly(date: Date): string {
+export function formatEventTimeOnly(date: Date, timeZone?: string): string {
   return new Intl.DateTimeFormat('en-US', {
+    ...(timeZone ? { timeZone } : {}),
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+}
+
+export function formatEventTimeRange(startAt: Date, endAt: Date, timeZone?: string): string {
+  return `${formatEventTimeOnly(startAt, timeZone)} – ${formatEventTimeOnly(endAt, timeZone)}`;
 }
 
 function escapeIcsText(value: string): string {
@@ -308,9 +440,12 @@ function formatIcsUtcTimestamp(date: Date): string {
   );
 }
 
-export function buildIcsContent(event: SchoolEvent, durationMinutes: number = 60): string {
-  const start = event.dateTime;
-  const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+export function buildIcsContent(event: SchoolEvent, fallbackDurationMinutes: number = 60): string {
+  const start = event.startAt;
+  const end =
+    event.endAt && event.endAt.getTime() > start.getTime()
+      ? event.endAt
+      : new Date(start.getTime() + fallbackDurationMinutes * 60 * 1000);
   const uid = `${event.id}@oneplace.campus`;
   const dtStamp = formatIcsUtcTimestamp(new Date());
   const dtStart = formatIcsUtcTimestamp(start);
@@ -347,10 +482,13 @@ export function getIcsFilename(title: string): string {
 
 export function buildGoogleCalendarUrl(
   event: SchoolEvent,
-  durationMinutes: number = 60
+  fallbackDurationMinutes: number = 60
 ): string {
-  const start = event.dateTime;
-  const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+  const start = event.startAt;
+  const end =
+    event.endAt && event.endAt.getTime() > start.getTime()
+      ? event.endAt
+      : new Date(start.getTime() + fallbackDurationMinutes * 60 * 1000);
   const dates = `${formatIcsUtcTimestamp(start)}/${formatIcsUtcTimestamp(end)}`;
   const details = [`Hosted by ${event.hostClub}`, event.description]
     .filter(Boolean)

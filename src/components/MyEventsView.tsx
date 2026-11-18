@@ -1,7 +1,7 @@
 import type { User } from 'firebase/auth';
 import { BookmarkCheck, Calendar, Compass } from 'lucide-react';
 import type { SchoolEvent } from '../types/event';
-import { splitMyEvents } from '../utils/events';
+import { getDateTileParts, groupEventsByDate, splitMyEvents } from '../utils/events';
 import { EventCard } from './EventCard';
 
 interface MyEventsViewProps {
@@ -12,6 +12,78 @@ interface MyEventsViewProps {
   onSelectEvent: (event: SchoolEvent) => void;
   onSignIn: () => void;
   onExplore: () => void;
+}
+
+function DateGroupedSchedule({
+  events,
+  getEffectiveRsvp,
+  isSignedIn,
+  onRsvpClick,
+  onSelectEvent,
+}: {
+  events: SchoolEvent[];
+  getEffectiveRsvp: (event: SchoolEvent) => { rsvpCount: number; isGoing: boolean };
+  isSignedIn: boolean;
+  onRsvpClick: (event: SchoolEvent) => void;
+  onSelectEvent: (event: SchoolEvent) => void;
+}) {
+  const dateGroups = groupEventsByDate(events);
+  let cardIndex = 0;
+
+  return (
+    <div className="space-y-6">
+      {dateGroups.map((group) => {
+        const firstDate = group.events[0]?.dateTime;
+        const tile = firstDate ? getDateTileParts(firstDate) : null;
+
+        return (
+          <div key={group.dateKey} className="space-y-3">
+            <div className="flex items-center gap-3">
+              {tile && (
+                <div
+                  className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-xl border border-[#E5E7EB] bg-white shadow-xs"
+                  aria-hidden="true"
+                >
+                  <span className="font-mono text-[9px] font-bold tracking-wider text-[#E85D04] leading-none">
+                    {tile.month}
+                  </span>
+                  <span className="mt-0.5 font-display text-sm font-extrabold text-[#171717] leading-none">
+                    {tile.day}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center gap-2 min-w-0">
+                <h3 className="font-display text-sm sm:text-base font-bold text-[#171717]">
+                  {group.label}
+                </h3>
+                <span className="font-mono tabular-nums text-xs text-[#737373]">
+                  · {group.events.length} {group.events.length === 1 ? 'event' : 'events'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3.5">
+              {group.events.map((event) => {
+                const { rsvpCount, isGoing } = getEffectiveRsvp(event);
+                return (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    index={cardIndex++}
+                    rsvpCount={rsvpCount}
+                    isGoing={isGoing}
+                    isSignedIn={isSignedIn}
+                    onRsvpClick={onRsvpClick}
+                    onSelectEvent={onSelectEvent}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function MyEventsView({
@@ -126,23 +198,13 @@ export function MyEventsView({
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
-            {attending.map((event, idx) => {
-              const { rsvpCount, isGoing } = getEffectiveRsvp(event);
-              return (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  index={idx}
-                  rsvpCount={rsvpCount}
-                  isGoing={isGoing}
-                  isSignedIn={Boolean(user)}
-                  onRsvpClick={onRsvpClick}
-                  onSelectEvent={onSelectEvent}
-                />
-              );
-            })}
-          </div>
+          <DateGroupedSchedule
+            events={attending}
+            getEffectiveRsvp={getEffectiveRsvp}
+            isSignedIn={Boolean(user)}
+            onRsvpClick={onRsvpClick}
+            onSelectEvent={onSelectEvent}
+          />
         )}
       </section>
 
@@ -166,23 +228,13 @@ export function MyEventsView({
             <p className="text-sm text-[#737373]">No upcoming events scheduled right now.</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {upcoming.map((event, idx) => {
-              const { rsvpCount, isGoing } = getEffectiveRsvp(event);
-              return (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  index={idx}
-                  rsvpCount={rsvpCount}
-                  isGoing={isGoing}
-                  isSignedIn={Boolean(user)}
-                  onRsvpClick={onRsvpClick}
-                  onSelectEvent={onSelectEvent}
-                />
-              );
-            })}
-          </div>
+          <DateGroupedSchedule
+            events={upcoming}
+            getEffectiveRsvp={getEffectiveRsvp}
+            isSignedIn={Boolean(user)}
+            onRsvpClick={onRsvpClick}
+            onSelectEvent={onSelectEvent}
+          />
         )}
       </section>
 
@@ -207,23 +259,13 @@ export function MyEventsView({
             <span>You have no past events from this semester yet.</span>
           </div>
         ) : (
-          <div className="space-y-4">
-            {past.map((event, idx) => {
-              const { rsvpCount, isGoing } = getEffectiveRsvp(event);
-              return (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  index={idx}
-                  rsvpCount={rsvpCount}
-                  isGoing={isGoing}
-                  isSignedIn={Boolean(user)}
-                  onRsvpClick={onRsvpClick}
-                  onSelectEvent={onSelectEvent}
-                />
-              );
-            })}
-          </div>
+          <DateGroupedSchedule
+            events={past}
+            getEffectiveRsvp={getEffectiveRsvp}
+            isSignedIn={Boolean(user)}
+            onRsvpClick={onRsvpClick}
+            onSelectEvent={onSelectEvent}
+          />
         )}
       </section>
     </div>

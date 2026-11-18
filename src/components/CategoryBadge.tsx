@@ -11,6 +11,7 @@ const CATEGORY_STYLES: Record<EventCategory, string> = {
   Athletics: 'bg-[#16A34A]/[0.08] text-[#15803D] border-[#16A34A]/15',
   Academic: 'bg-[#171717]/[0.05] text-[#404040] border-[#E5E7EB]',
   'Arts & Music': 'bg-[#D97706]/[0.08] text-[#B45309] border-[#D97706]/20',
+  'Social & Community': 'bg-[#E85D04]/[0.06] text-[#9A3412] border-[#E85D04]/15',
 };
 
 export function CategoryBadge({ category, size = 'sm' }: CategoryBadgeProps) {

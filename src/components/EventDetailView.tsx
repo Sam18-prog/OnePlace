@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
+  AlertCircle,
   ArrowLeft,
   Calendar,
   CalendarPlus,
@@ -13,11 +14,13 @@ import {
 import type { SchoolEvent } from '../types/event';
 import {
   buildGoogleCalendarUrl,
-  formatEventTimeOnly,
+  formatEventTimeRange,
   formatFullEventDate,
 } from '../utils/events';
+import { isPastEvent } from '../utils/eventValidation';
 import { CategoryBadge } from './CategoryBadge';
 import { EventImage } from './EventImage';
+import { EventStatusBadge } from './organizer/EventStatusBadge';
 
 interface EventDetailViewProps {
   event: SchoolEvent | null;
@@ -36,20 +39,42 @@ export function EventDetailView({
   onRsvpClick,
   onClose,
 }: EventDetailViewProps) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!event) return;
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusTimer = window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 20);
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = prevOverflow;
+      previousFocusRef.current?.focus?.();
+    };
   }, [event, onClose]);
 
   if (!event) return null;
 
   const googleCalendarUrl = buildGoogleCalendarUrl(event);
-  const fullDate = formatFullEventDate(event.dateTime);
-  const timeOnly = formatEventTimeOnly(event.dateTime);
+  const fullDate = formatFullEventDate(event.startAt, event.timezone);
+  const timeRange = formatEventTimeRange(event.startAt, event.endAt, event.timezone);
+  const isCancelled = event.status === 'cancelled';
+  const isDraft = event.status === 'draft';
+  const isPast = isPastEvent(event);
+  const rsvpBlocked = (isCancelled || isDraft || isPast) && !isGoing;
 
   return (
     <div
@@ -69,6 +94,7 @@ export function EventDetailView({
         {/* Top Bar (Mobile Back + Desktop Close) */}
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-4 py-3 sm:px-6 bg-white shrink-0">
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg px-2 py-1 text-xs sm:text-sm font-medium text-[#737373] hover:bg-[#F8F9FA] hover:text-[#171717] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
@@ -89,6 +115,21 @@ export function EventDetailView({
 
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 md:p-7">
+          {isCancelled && (
+            <div
+              role="alert"
+              className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs sm:text-sm text-red-800"
+            >
+              <AlertCircle className="h-4 w-4 text-[#DC2626] mt-0.5 shrink-0" aria-hidden="true" />
+              <div>
+                <p className="font-semibold">This event has been cancelled.</p>
+                {event.cancellationReason && (
+                  <p className="mt-0.5 text-red-700">{event.cancellationReason}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-[1.05fr_1fr] gap-6 md:gap-7 items-start">
             {/* Left Column: Cover Image & Quick Facts */}
             <div className="space-y-4">
@@ -97,7 +138,9 @@ export function EventDetailView({
                   eventId={event.id}
                   title={event.title}
                   category={event.category}
-                  className="aspect-[16/10] w-full"
+                  imageUrl={event.imageUrl}
+                  priority
+                  className={`aspect-[16/10] w-full ${isCancelled ? 'opacity-70 grayscale-[35%]' : ''}`}
                 />
               </div>
 
@@ -114,7 +157,8 @@ export function EventDetailView({
                   <Clock className="h-4 w-4 text-[#E85D04] mt-0.5 shrink-0" aria-hidden="true" />
                   <div>
                     <p className="text-xs font-medium text-[#737373]">Time</p>
-                    <p className="font-mono text-sm font-semibold text-[#171717]">{timeOnly}</p>
+                    <p className="font-mono text-sm font-semibold text-[#171717]">{timeRange}</p>
+                    <p className="font-mono text-[11px] text-[#737373]">{event.timezone}</p>
                   </div>
                 </div>
 
@@ -133,6 +177,13 @@ export function EventDetailView({
               <div>
                 <div className="flex flex-wrap items-center gap-2 mb-3">
                   <CategoryBadge category={event.category} size="md" />
+                  {(event.status !== 'published' || event.visibility === 'school' || isPast) && (
+                    <EventStatusBadge
+                      status={event.status}
+                      visibility={event.visibility}
+                      isPast={isPast}
+                    />
+                  )}
                   <span className="text-xs font-medium text-[#737373]">
                     Hosted by {event.hostClub}
                   </span>
@@ -166,34 +217,53 @@ export function EventDetailView({
               <div className="hidden md:flex flex-col gap-2.5 mt-7 pt-5 border-t border-[#E5E7EB]">
                 <motion.button
                   type="button"
-                  onClick={() => onRsvpClick(event)}
+                  disabled={rsvpBlocked || isDraft}
+                  onClick={() => {
+                    if (!rsvpBlocked && !isDraft) onRsvpClick(event);
+                  }}
                   aria-pressed={isGoing}
-                  whileTap={{ scale: 0.98 }}
-                  className={`inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04] ${
-                    isGoing
-                      ? 'bg-[#16A34A] text-white hover:bg-[#15803D]'
-                      : 'bg-[#E85D04] text-white hover:bg-[#DC2F02]'
+                  whileTap={rsvpBlocked || isDraft ? undefined : { scale: 0.98 }}
+                  className={`inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04] ${
+                    rsvpBlocked || isDraft
+                      ? 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed'
+                      : isGoing && isCancelled
+                        ? 'border border-red-200 bg-red-50 text-[#DC2626] hover:bg-red-100 cursor-pointer'
+                        : isGoing
+                          ? 'bg-[#16A34A] text-white hover:bg-[#15803D] cursor-pointer'
+                          : 'bg-[#E85D04] text-white hover:bg-[#DC2F02] cursor-pointer'
                   }`}
                 >
                   {isGoing ? (
-                    <>
-                      <Check className="h-4 w-4" aria-hidden="true" />
-                      <span>You're going!</span>
-                    </>
+                    isCancelled ? (
+                      <span>Cancel RSVP</span>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" aria-hidden="true" />
+                        <span>You're going!</span>
+                      </>
+                    )
+                  ) : isCancelled ? (
+                    <span>Event Cancelled</span>
+                  ) : isDraft ? (
+                    <span>Draft Preview (Not Accepting RSVPs)</span>
+                  ) : isPast ? (
+                    <span>Event Has Ended</span>
                   ) : (
                     <span>{isSignedIn ? 'RSVP to this event' : 'Sign in to RSVP'}</span>
                   )}
                 </motion.button>
 
-                <a
-                  href={googleCalendarUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-[#E5E7EB] bg-white px-4 py-2.5 text-sm font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
-                >
-                  <CalendarPlus className="h-4 w-4 text-[#737373]" aria-hidden="true" />
-                  <span>Add to Google Calendar</span>
-                </a>
+                {!isCancelled && (
+                  <a
+                    href={googleCalendarUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-[#E5E7EB] bg-white px-4 py-2.5 text-sm font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
+                  >
+                    <CalendarPlus className="h-4 w-4 text-[#737373]" aria-hidden="true" />
+                    <span>Add to Google Calendar</span>
+                  </a>
+                )}
               </div>
             </div>
           </div>
@@ -201,32 +271,51 @@ export function EventDetailView({
 
         {/* Mobile Sticky Action Footer */}
         <div className="md:hidden border-t border-[#E5E7EB] bg-white px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] flex items-center gap-2.5 shrink-0">
-          <a
-            href={googleCalendarUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Add ${event.title} to Google Calendar`}
-            className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] shrink-0"
-          >
-            <CalendarPlus className="h-4 w-4 text-[#737373]" aria-hidden="true" />
-            <span>Calendar</span>
-          </a>
+          {!isCancelled && (
+            <a
+              href={googleCalendarUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Add ${event.title} to Google Calendar`}
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] shrink-0"
+            >
+              <CalendarPlus className="h-4 w-4 text-[#737373]" aria-hidden="true" />
+              <span>Calendar</span>
+            </a>
+          )}
 
           <button
             type="button"
-            onClick={() => onRsvpClick(event)}
+            disabled={rsvpBlocked || isDraft}
+            onClick={() => {
+              if (!rsvpBlocked && !isDraft) onRsvpClick(event);
+            }}
             aria-pressed={isGoing}
-            className={`inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors cursor-pointer ${
-              isGoing
-                ? 'bg-[#16A34A] text-white hover:bg-[#15803D]'
-                : 'bg-[#E85D04] text-white hover:bg-[#DC2F02]'
+            className={`inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+              rsvpBlocked || isDraft
+                ? 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed'
+                : isGoing && isCancelled
+                  ? 'border border-red-200 bg-red-50 text-[#DC2626] hover:bg-red-100 cursor-pointer'
+                  : isGoing
+                    ? 'bg-[#16A34A] text-white hover:bg-[#15803D] cursor-pointer'
+                    : 'bg-[#E85D04] text-white hover:bg-[#DC2F02] cursor-pointer'
             }`}
           >
             {isGoing ? (
-              <>
-                <Check className="h-4 w-4" aria-hidden="true" />
-                <span>You're going!</span>
-              </>
+              isCancelled ? (
+                <span>Cancel RSVP</span>
+              ) : (
+                <>
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  <span>You're going!</span>
+                </>
+              )
+            ) : isCancelled ? (
+              <span>Cancelled</span>
+            ) : isDraft ? (
+              <span>Draft Only</span>
+            ) : isPast ? (
+              <span>Event Ended</span>
             ) : (
               <span>{isSignedIn ? 'RSVP' : 'Sign in to RSVP'}</span>
             )}

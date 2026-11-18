@@ -5,8 +5,11 @@ import {
   buildIcsContent,
   filterEvents,
   formatEventDateTime,
+  getCategoryCounts,
+  getDateTileParts,
   getIcsFilename,
   getTimeframeBucket,
+  groupEventsByDate,
   groupEventsByTimeframe,
   inferEventCategory,
   parseDemoEvents,
@@ -54,6 +57,17 @@ test('parseDemoEvents sorts chronologically ascending regardless of input order'
   );
   assert.equal(events[0].category, 'STEM & Makers');
   assert.equal(events[1].category, 'Athletics');
+});
+
+test('parseDemoEvents accepts https imageUrl and rejects unsafe javascript URLs', () => {
+  const events = parseDemoEvents([
+    { ...SAMPLE_RAW[0], imageUrl: 'https://cdn.example.com/poster.jpg' },
+    { ...SAMPLE_RAW[1], imageUrl: 'javascript:alert(1)' },
+  ]);
+  const withSafe = events.find((e) => e.id === 'evt-later');
+  const withUnsafe = events.find((e) => e.id === 'evt-today');
+  assert.equal(withSafe?.imageUrl, 'https://cdn.example.com/poster.jpg');
+  assert.equal(withUnsafe?.imageUrl, undefined);
 });
 
 test('inferEventCategory maps club and event keywords deterministically', () => {
@@ -139,6 +153,21 @@ test('splitMyEvents partitions attending, upcoming, and past events cleanly', ()
   );
 });
 
+test('getCategoryCounts, groupEventsByDate, and getDateTileParts summarize schedule accurately', () => {
+  const events = parseDemoEvents(SAMPLE_RAW);
+  const counts = getCategoryCounts(events);
+  assert.equal(counts['STEM & Makers'], 2);
+  assert.equal(counts['Athletics'], 1);
+
+  const dateGroups = groupEventsByDate(events, NOW);
+  assert.equal(dateGroups.length, 3);
+  assert.match(dateGroups[0].label, /^Today · Tue, Nov 17$/);
+
+  const tile = getDateTileParts(events[0].dateTime);
+  assert.equal(tile.month, 'NOV');
+  assert.equal(tile.day, '17');
+});
+
 test('formatEventDateTime formats Today concisely and future dates with weekday', () => {
   const events = parseDemoEvents(SAMPLE_RAW);
   assert.match(formatEventDateTime(events[0].dateTime, NOW), /^Today · 3:30 PM$/);
@@ -164,4 +193,22 @@ test('buildGoogleCalendarUrl encodes fields and formats UTC date range', () => {
   assert.ok(url.includes('&location=Engineering%20Lab%20104'));
   assert.match(url, /&dates=\d{8}T\d{6}Z\/\d{8}T\d{6}Z/);
   assert.ok(url.includes(`&details=${encodeURIComponent('Hosted by FRC Team 4210\n\nDrivetrain assembly, wiring & testing.')}`));
+});
+
+test('inferEventCategory supports Social & Community and parseDemoEvents populates Phase 2 metadata', () => {
+  assert.equal(
+    inferEventCategory({ id: 'soc-1', title: 'Campus Welcome Picnic', hostClub: 'Spirit Crew' }),
+    'Social & Community'
+  );
+  const events = parseDemoEvents(SAMPLE_RAW, {
+    schoolId: 'oakridge-high',
+    timezone: 'America/Los_Angeles',
+    createdBy: 'admin-uid',
+  });
+  assert.equal(events[0].schoolId, 'oakridge-high');
+  assert.equal(events[0].timezone, 'America/Los_Angeles');
+  assert.equal(events[0].status, 'published');
+  assert.equal(events[0].visibility, 'public');
+  assert.equal(events[0].discoverKey, 'public:oakridge-high');
+  assert.equal(events[0].endAt.getTime() - events[0].startAt.getTime(), 60 * 60 * 1000);
 });
