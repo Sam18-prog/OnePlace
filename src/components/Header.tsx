@@ -93,12 +93,12 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 border-b border-[#E5E7EB] bg-white">
-      <div className="mx-auto flex h-14 md:h-16 max-w-6xl items-center justify-between gap-3 lg:gap-4 px-4 sm:px-6">
-        <div className="flex items-center gap-4 lg:gap-7 shrink-0">
+      <div className="mx-auto flex h-14 md:h-16 max-w-6xl items-center justify-between gap-2 sm:gap-3 lg:gap-4 px-3 sm:px-6">
+        <div className="flex items-center gap-3 lg:gap-7 shrink-0 min-w-0">
           <button
             type="button"
             onClick={() => onNavigate('discover')}
-            className="inline-flex items-center gap-2.5 rounded-lg text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
+            className="inline-flex items-center gap-2 sm:gap-2.5 rounded-lg text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
           >
             <span
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E85D04] text-white shrink-0"
@@ -159,7 +159,7 @@ export function Header({
           </nav>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           <button
             type="button"
             onClick={onFocusSearch}
@@ -182,7 +182,7 @@ export function Header({
               className={`h-4 w-4 text-[#737373] ${isRefreshing ? 'animate-spin' : ''}`}
               aria-hidden="true"
             />
-            <span className="hidden sm:inline">Refresh</span>
+            <span className="hidden lg:inline">Refresh</span>
           </button>
 
           <NotificationBellDropdown
@@ -352,9 +352,10 @@ export function Header({
             <button
               type="button"
               onClick={onSignIn}
-              className="inline-flex min-h-[40px] md:min-h-[38px] items-center justify-center rounded-lg bg-[#E85D04] px-3.5 py-1.5 text-xs sm:text-sm font-semibold text-white hover:bg-[#DC2F02] active:scale-[0.98] transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
+              className="inline-flex min-h-[40px] md:min-h-[38px] items-center justify-center rounded-lg bg-[#E85D04] px-3 sm:px-3.5 py-1.5 text-xs sm:text-sm font-semibold text-white hover:bg-[#DC2F02] active:scale-[0.98] transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
             >
-              Sign in with Google
+              <span className="lg:hidden">Sign in</span>
+              <span className="hidden lg:inline">Sign in with Google</span>
             </button>
           )}
         </div>

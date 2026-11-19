@@ -2,24 +2,28 @@ import type { AppView } from '../types/event';
 
 interface FooterProps {
   onNavigate: (view: AppView) => void;
+  onOpenFeedback?: () => void;
   totalEvents: number;
   totalClubs?: number;
   canAccessOrganizer?: boolean;
   schoolName?: string;
+  schoolLocation?: string;
 }
 
 export function Footer({
   onNavigate,
+  onOpenFeedback,
   totalEvents,
   totalClubs,
   canAccessOrganizer = false,
   schoolName,
+  schoolLocation,
 }: FooterProps) {
   return (
     <footer className="border-t border-[#E5E7EB] bg-white mt-12 pb-20 md:pb-8">
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span
               className="flex h-6 w-6 items-center justify-center rounded-md bg-[#E85D04] text-white shrink-0"
               aria-hidden="true"
@@ -42,7 +46,10 @@ export function Footer({
               OnePlace
             </span>
             {schoolName && (
-              <span className="text-xs text-[#737373]">· {schoolName}</span>
+              <span className="text-xs text-[#737373]">
+                · {schoolName}
+                {schoolLocation ? ` (${schoolLocation})` : ''}
+              </span>
             )}
           </div>
           <p className="mt-1.5 text-xs text-[#737373]">
@@ -57,7 +64,7 @@ export function Footer({
           </p>
         </div>
 
-        <nav className="flex flex-wrap items-center gap-5 text-xs font-medium text-[#737373]" aria-label="Footer navigation">
+        <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-[#737373]" aria-label="Footer navigation">
           <button
             type="button"
             onClick={() => onNavigate('discover')}
@@ -93,6 +100,22 @@ export function Footer({
           >
             Notifications
           </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('about')}
+            className="hover:text-[#171717] transition-colors cursor-pointer"
+          >
+            About OnePlace
+          </button>
+          {onOpenFeedback && (
+            <button
+              type="button"
+              onClick={onOpenFeedback}
+              className="hover:text-[#E85D04] transition-colors cursor-pointer"
+            >
+              Send Feedback
+            </button>
+          )}
           {canAccessOrganizer && (
             <button
               type="button"

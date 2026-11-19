@@ -184,3 +184,68 @@ test('mergeInAppNotifications deduplicates persisted docs and applies local read
   assert.equal(mergedWithLocalRead.length, 1);
   assert.equal(mergedWithLocalRead[0].status, 'read');
 });
+
+test('deriveStarterTierNotifications surfaces active Phase 8 event announcements for registered events', () => {
+  const prefs = createDefaultNotificationPreferences('u1', 'oakridge-high');
+  const evt = makeEvent({ id: 'evt-ops-1', title: 'Robotics Showcase' });
+  const eventAnnouncementsByEventId = {
+    'evt-ops-1': [
+      {
+        id: 'eann-active',
+        eventId: 'evt-ops-1',
+        schoolId: 'oakridge-high',
+        title: 'Room moved to Gym B',
+        message: 'Please arrive 10 minutes early for check-in.',
+        status: 'active' as const,
+        createdBy: 'org-1',
+        createdAt: new Date('2026-11-18T11:50:00.000Z'),
+        updatedAt: new Date('2026-11-18T11:50:00.000Z'),
+      },
+      {
+        id: 'eann-archived',
+        eventId: 'evt-ops-1',
+        schoolId: 'oakridge-high',
+        title: 'Old update',
+        message: 'Superseded notice.',
+        status: 'archived' as const,
+        createdBy: 'org-1',
+        createdAt: new Date('2026-11-18T10:00:00.000Z'),
+        updatedAt: new Date('2026-11-18T10:30:00.000Z'),
+      },
+    ],
+  };
+
+  const items = deriveStarterTierNotifications({
+    uid: 'u1',
+    schoolId: 'oakridge-high',
+    preferences: prefs,
+    announcements: [],
+    clubs: [],
+    events: [evt],
+    followedById: {},
+    isEventGoing: () => true,
+    eventAnnouncementsByEventId,
+    now: BASE_NOW,
+  });
+
+  const annNotifs = items.filter((i) => i.type === 'event_update');
+  assert.equal(annNotifs.length, 1);
+  assert.match(annNotifs[0].title, /Room moved to Gym B/);
+  assert.equal(annNotifs[0].entityId, 'evt-ops-1');
+
+  // Unregistered students should not receive event-specific updates
+  const unregistered = deriveStarterTierNotifications({
+    uid: 'u1',
+    schoolId: 'oakridge-high',
+    preferences: prefs,
+    announcements: [],
+    clubs: [],
+    events: [evt],
+    followedById: {},
+    isEventGoing: () => false,
+    eventAnnouncementsByEventId,
+    now: BASE_NOW,
+  });
+  assert.equal(unregistered.filter((i) => i.type === 'event_update').length, 0);
+});
+

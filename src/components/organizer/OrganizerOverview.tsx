@@ -1,12 +1,13 @@
-import { ArrowUpRight, CalendarCheck, Compass, Plus } from 'lucide-react';
+import { ArrowUpRight, BarChart3, CalendarCheck, Compass, Plus } from 'lucide-react';
 import type { SchoolEvent } from '../../types/event';
-import { isPastEvent } from '../../utils/eventValidation';
+import { computeOrganizerKpis } from '../../utils/analytics';
 
 interface OrganizerOverviewProps {
   events: SchoolEvent[];
   onCreateEvent: () => void;
   onFocusManageEvents: () => void;
   onViewPublishedEvents: () => void;
+  onOpenAnalytics?: () => void;
 }
 
 export function OrganizerOverview({
@@ -14,24 +15,17 @@ export function OrganizerOverview({
   onCreateEvent,
   onFocusManageEvents,
   onViewPublishedEvents,
+  onOpenAnalytics,
 }: OrganizerOverviewProps) {
-  const now = new Date();
-  const totalCreated = events.length;
-  const publishedCount = events.filter((e) => e.status === 'published').length;
-  const draftCount = events.filter((e) => e.status === 'draft').length;
-  const cancelledCount = events.filter((e) => e.status === 'cancelled').length;
-  const upcomingCount = events.filter(
-    (e) => e.status === 'published' && !isPastEvent(e, now)
-  ).length;
-  const totalRsvps = events.reduce((acc, e) => acc + e.rsvpCount, 0);
+  const kpis = computeOrganizerKpis(events, new Date());
 
   const metrics = [
-    { label: 'Total Created', value: totalCreated, tone: 'text-[#171717]' },
-    { label: 'Published', value: publishedCount, tone: 'text-[#16A34A]' },
-    { label: 'Drafts', value: draftCount, tone: 'text-[#D97706]' },
-    { label: 'Cancelled', value: cancelledCount, tone: 'text-[#DC2626]' },
-    { label: 'Upcoming Live', value: upcomingCount, tone: 'text-[#171717]' },
-    { label: 'Total RSVPs', value: totalRsvps, tone: 'text-[#E85D04]' },
+    { label: 'Total Created', value: kpis.totalCreated, tone: 'text-[#171717]' },
+    { label: 'Published', value: kpis.published, tone: 'text-[#16A34A]' },
+    { label: 'Drafts', value: kpis.draft, tone: 'text-[#D97706]' },
+    { label: 'Cancelled', value: kpis.cancelled, tone: 'text-[#DC2626]' },
+    { label: 'Upcoming Live', value: kpis.upcoming, tone: 'text-[#2563EB]' },
+    { label: 'Current RSVPs', value: kpis.totalCurrentRsvps, tone: 'text-[#E85D04]' },
   ];
 
   return (
@@ -41,7 +35,7 @@ export function OrganizerOverview({
           id="organizer-overview-heading"
           className="font-display text-base font-bold tracking-tight text-[#171717]"
         >
-          Overview & Quick Actions
+          Overview &amp; Quick Actions
         </h2>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -60,8 +54,19 @@ export function OrganizerOverview({
             className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
           >
             <CalendarCheck className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
-            <span>Manage Events</span>
+            <span>My Events</span>
           </button>
+
+          {onOpenAnalytics && (
+            <button
+              type="button"
+              onClick={onOpenAnalytics}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-medium text-[#171717] hover:bg-[#F8F9FA] transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04]"
+            >
+              <BarChart3 className="h-3.5 w-3.5 text-[#E85D04]" aria-hidden="true" />
+              <span>Analytics</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -79,7 +84,7 @@ export function OrganizerOverview({
         {metrics.map((metric) => (
           <div
             key={metric.label}
-            className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-xs"
+            className="rounded-xl border border-[#E5E7EB] bg-white p-4"
           >
             <p className="text-xs font-medium text-[#737373]">{metric.label}</p>
             <p className={`mt-1.5 font-mono tabular-nums text-2xl font-bold ${metric.tone}`}>

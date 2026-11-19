@@ -129,3 +129,23 @@ OnePlace targets the existing Firebase project **`thermal-surface-rgt36`** (Fire
 4. **Admin SDK (`firebase-admin`) Cross-User Writes & Composite Indexes**:
    - Server-side `firebase-admin` fan-out writes into recipients' `users/{uid}/notifications` subcollections and deploying composite indexes (`firestore.indexes.json`) via Firebase CLI require a Blaze-enabled project with IAM & Cloud Functions permissions.
 
+---
+
+## 7. Phase 5: Campus Analytics, Event Intelligence & Organizer Insights
+
+### Implemented Components & Pure Modules
+1. **Analytics Contracts & Computation Engine (`src/types/analytics.ts`, `src/utils/analytics.ts`)**:
+   - Strict RBAC scope filtering (`filterAuthorizedClubsForAnalytics`, `filterAuthorizedEventsForAnalytics`, `mergeDeduplicatedEvents`) isolating Students (`[]`), Organizers (owned events + assigned clubs only), and School Admins (strictly `membership.schoolId`).
+   - Timezone-aware (`schoolConfig.timezone`) date presets (`All Time`, `Last 7 Days`, `Last 30 Days`, `Last 90 Days`, `This Semester`, `This Year`, `Custom Range`) supporting filtering by either Event Date (`startAt`) or Created Date (`createdAt`).
+   - Exact aggregations for Organizer KPIs, Event Performance rows (with relative vs published mean comparison), Category Breakdown, RSVP Distribution Buckets (`0`, `1–5`, `6–15`, `16–30`, `31+`), Club Engagement rows, Scheduled Month grouping, and School Administrator Rollups.
+2. **RFC 4180 CSV Exports (`src/utils/analyticsCsv.ts`)**:
+   - Clean browser downloads (`oneplace-<report>-<YYYY-MM-DD>.csv`) for Event Performance, Club Summary, RSVP Aggregate, and Admin-only School Aggregate reports with full quote/comma/newline escaping and zero student PII, emails, or UIDs.
+3. **Analytics UI & Organizer Studio Upgrade (`src/components/analytics/*`, `src/components/organizer/OrganizerDashboard.tsx`, `OrganizerOverview.tsx`)**:
+   - Upgraded `OrganizerDashboard` navigation to `Overview`, `My Events`, `Clubs`, `Analytics`, and `Settings`.
+   - Lightweight editorial SVG/CSS charts (`HorizontalBarChart`, `DonutBreakdownChart`, `RsvpDistributionChart`, `MonthlyScheduleChart`, `EventComparisonPanel`), sortable/filterable/paginated `EventPerformanceTable`, `ClubComparisonSection`, `SchoolAdminAnalyticsSection`, and `AnalyticsDashboard` disclosure of Starter Tier measurement boundaries (`ANALYTICS_DATA_LIMITATIONS`).
+
+### Starter Tier Honesty vs. Blaze Analytics Upgrade
+- **Available on Starter Tier**: Cumulative `rsvpCount` intent totals, event status & category distributions, monthly scheduled volume (`startAt`), club `followerCount` totals, and client-scoped CSV reports using existing bounded Firestore queries without weakening `firestore.rules`.
+- **Requires Blaze Upgrade (Future `FutureAnalyticsAggregateContract`)**: Unbounded server-side historical rollups (`schools/{schoolId}/analytics/{periodId}`, `clubs/{clubId}/analytics/{periodId}`, `events/{eventId}/analytics/{periodId}`), daily RSVP growth curves, scheduled club follower snapshots, and authenticated event view/bookmark telemetry.
+
+

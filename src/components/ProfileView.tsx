@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
+  AlertCircle,
   Bell,
   BookmarkCheck,
   Check,
+  ChevronDown,
   ChevronRight,
   Compass,
   Copy,
   LayoutDashboard,
+  Lock,
   LogOut,
   MapPin,
+  MessageSquarePlus,
   Settings,
   ShieldCheck,
   User as UserIcon,
@@ -38,6 +42,8 @@ interface ProfileViewProps {
   onOpenNotifications?: () => void;
   onOpenNotificationPreferences?: () => void;
   onOpenOrganizer: () => void;
+  onOpenFeedback?: () => void;
+  onOpenStudentTour?: () => void;
   onSelectEvent: (event: SchoolEvent) => void;
   onExplore: () => void;
 }
@@ -60,11 +66,14 @@ export function ProfileView({
   onOpenNotifications,
   onOpenNotificationPreferences,
   onOpenOrganizer,
+  onOpenFeedback,
+  onOpenStudentTour,
   onSelectEvent,
   onExplore,
 }: ProfileViewProps) {
   const [avatarError, setAvatarError] = useState(false);
   const [copiedUid, setCopiedUid] = useState(false);
+  const [showSupportId, setShowSupportId] = useState(false);
 
   if (!user) {
     return (
@@ -149,37 +158,62 @@ export function ProfileView({
             {user.email && (
               <p className="text-xs sm:text-sm text-[#737373] truncate">{user.email}</p>
             )}
-            <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[#16A34A]">
-              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-              Verified Google Account
-            </p>
+            {user.emailVerified ? (
+              <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[#16A34A]">
+                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                Verified Google Account
+              </p>
+            ) : (
+              <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-[#D97706]">
+                <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                Email verification required for RSVPs and writes
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-2 rounded-xl border border-[#E5E7EB] bg-[#F8F9FA] px-3 py-2">
-          <div className="min-w-0">
-            <p className="text-[10px] font-medium uppercase tracking-wider text-[#737373]">
-              Campus User ID
-            </p>
-            <p className="font-mono text-[11px] text-[#171717] truncate">{user.uid}</p>
-          </div>
+        {/* Collapsible Support / Role Assignment ID (minimizes passive UID exposure) */}
+        <div className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F8F9FA] px-3 py-2">
           <button
             type="button"
-            onClick={() => void handleCopyUid()}
-            className="inline-flex min-h-[30px] items-center gap-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1 text-[11px] font-medium text-[#171717] hover:bg-[#F3F4F6] shrink-0 cursor-pointer"
+            onClick={() => setShowSupportId((prev) => !prev)}
+            aria-expanded={showSupportId}
+            className="flex w-full items-center justify-between gap-2 text-left text-[11px] font-medium text-[#525252] hover:text-[#171717] cursor-pointer"
           >
-            {copiedUid ? (
-              <>
-                <Check className="h-3 w-3 text-[#16A34A]" aria-hidden="true" />
-                <span>Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="h-3 w-3 text-[#737373]" aria-hidden="true" />
-                <span>Copy UID</span>
-              </>
-            )}
+            <span>Need organizer access? Show account support ID</span>
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-[#737373] transition-transform ${showSupportId ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            />
           </button>
+
+          {showSupportId && (
+            <div className="mt-2 pt-2 border-t border-[#E5E7EB] flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] font-medium uppercase tracking-wider text-[#737373]">
+                  Support &amp; Role Assignment ID
+                </p>
+                <p className="font-mono text-[11px] text-[#171717] truncate">{user.uid}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCopyUid()}
+                className="inline-flex min-h-[30px] items-center gap-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1 text-[11px] font-medium text-[#171717] hover:bg-[#F3F4F6] shrink-0 cursor-pointer"
+              >
+                {copiedUid ? (
+                  <>
+                    <Check className="h-3 w-3 text-[#16A34A]" aria-hidden="true" />
+                    <span>Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3 text-[#737373]" aria-hidden="true" />
+                    <span>Copy ID</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="mt-5 pt-5 border-t border-[#E5E7EB] flex flex-wrap items-center justify-between gap-3">
@@ -356,6 +390,46 @@ export function ProfileView({
           )}
         </div>
       )}
+
+      {/* Privacy, Campus Tour & Pilot Feedback */}
+      <div className="rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-xs space-y-4">
+        <div className="flex items-start gap-2.5">
+          <Lock className="h-4 w-4 text-[#737373] mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <h2 className="font-display text-sm font-bold text-[#171717]">
+              Student Privacy &amp; Data Control
+            </h2>
+            <p className="text-xs text-[#737373] leading-relaxed">
+              Your RSVPs, followed clubs, and notification preferences are private to your account—other students and organizers only see aggregate attendance counts. You can cancel any RSVP, unfollow clubs, or turn off notifications at any time. To request full account record removal, contact your school administrator.
+            </p>
+          </div>
+        </div>
+
+        {(onOpenFeedback || onOpenStudentTour) && (
+          <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-[#E5E7EB]">
+            {onOpenFeedback && (
+              <button
+                type="button"
+                onClick={onOpenFeedback}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-[#F8F9FA] px-3.5 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#E5E7EB]/60 cursor-pointer"
+              >
+                <MessageSquarePlus className="h-3.5 w-3.5 text-[#E85D04]" aria-hidden="true" />
+                <span>Send Feedback</span>
+              </button>
+            )}
+            {onOpenStudentTour && (
+              <button
+                type="button"
+                onClick={onOpenStudentTour}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-3.5 py-1.5 text-xs font-semibold text-[#171717] hover:bg-[#F8F9FA] cursor-pointer"
+              >
+                <Compass className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
+                <span>Open Campus Tour</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       <button
         type="button"

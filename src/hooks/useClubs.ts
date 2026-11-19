@@ -15,6 +15,7 @@ import {
   updateClubFollowNotifications,
 } from '../services/clubFollowService';
 import { computeOptimisticFollow } from '../utils/clubValidation';
+import { logClientDiagnostic, toUserFriendlyErrorMessage } from '../utils/errorHandling';
 
 export function useClubs(params: {
   user: User | null;
@@ -60,7 +61,8 @@ export function useClubs(params: {
       },
       onError: (err) => {
         if (!active) return;
-        setClubsError(err.message || 'Could not load campus clubs.');
+        logClientDiagnostic('Discover clubs listener error', err);
+        setClubsError(toUserFriendlyErrorMessage(err, 'Could not load campus clubs right now.'));
         setClubsLoading(false);
       },
     });
@@ -85,7 +87,7 @@ export function useClubs(params: {
         if (active) setAdminClubs(next);
       },
       onError: (err) => {
-        if (active) console.warn('Admin clubs listener error:', err);
+        if (active) logClientDiagnostic('Admin clubs listener error', err);
       },
     });
 
@@ -111,7 +113,7 @@ export function useClubs(params: {
         if (active) setFollowedById(next);
       },
       onError: (err) => {
-        if (active) console.warn('Followed clubs listener error:', err);
+        if (active) logClientDiagnostic('Followed clubs listener error', err);
       },
     });
 
@@ -137,7 +139,7 @@ export function useClubs(params: {
         if (active) setManagedAssignments(next);
       },
       onError: (err) => {
-        if (active) console.warn('Managed club assignments listener error:', err);
+        if (active) logClientDiagnostic('Managed club assignments listener error', err);
       },
     });
 
@@ -246,9 +248,10 @@ export function useClubs(params: {
             : `Club updates muted for ${club.name}.`
         );
       } catch (err) {
+        logClientDiagnostic('Update club follow notifications error', err);
         onShowToast(
           'error',
-          err instanceof Error ? err.message : 'Could not update notification preference.'
+          toUserFriendlyErrorMessage(err, 'Could not update notification preference.')
         );
       }
     },

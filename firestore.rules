@@ -32,9 +32,12 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Bootstrapped root administrator (verified email required)
-    function isBootstrappedAdmin() {
-      return isVerifiedUser() && request.auth.token.email == 'sameerkunwar995@gmail.com';
+    // Bootstrapped root administrator scoped strictly to the default school ('oakridge-high')
+    // so onboarding future schools never grants unintended cross-school admin access.
+    function isBootstrappedAdmin(schoolId) {
+      return isVerifiedUser()
+        && schoolId == 'oakridge-high'
+        && request.auth.token.email == 'sameerkunwar995@gmail.com';
     }
 
     // School-scoped RBAC lookups
@@ -69,12 +72,19 @@ service cloud.firestore {
         && get(memberPath(schoolId, request.auth.uid)).data.status == 'active';
     }
 
+    function isSuspendedSchoolMember(schoolId) {
+      return isSignedIn()
+        && isValidId(schoolId)
+        && exists(memberPath(schoolId, request.auth.uid))
+        && get(memberPath(schoolId, request.auth.uid)).data.status == 'suspended';
+    }
+
     function isActiveSchoolMember(schoolId) {
-      return isBootstrappedAdmin() || hasActiveMemberDoc(schoolId);
+      return isBootstrappedAdmin(schoolId) || hasActiveMemberDoc(schoolId);
     }
 
     function isSchoolAdmin(schoolId) {
-      return isBootstrappedAdmin() || (
+      return isBootstrappedAdmin(schoolId) || (
         hasActiveMemberDoc(schoolId)
         && get(memberPath(schoolId, request.auth.uid)).data.role == 'admin'
       );
@@ -98,6 +108,82 @@ service cloud.firestore {
         && isValidId(clubId)
         && exists(clubPath(schoolId, clubId))
         && get(clubPath(schoolId, clubId)).data.status == 'active';
+    }
+
+    // Phase 8 event paths and operational helpers
+    function eventPath(eventId) {
+      return /databases/$(database)/documents/events/$(eventId);
+    }
+
+    function eventAttendeePath(eventId, uid) {
+      return /databases/$(database)/documents/events/$(eventId)/attendees/$(uid);
+    }
+
+    function eventRegistrationPath(eventId, uid) {
+      return /databases/$(database)/documents/events/$(eventId)/registrations/$(uid);
+    }
+
+    function eventAttendancePath(eventId, uid) {
+      return /databases/$(database)/documents/events/$(eventId)/attendance/$(uid);
+    }
+
+    function eventFeedbackPath(eventId, uid) {
+      return /databases/$(database)/documents/events/$(eventId)/feedback/$(uid);
+    }
+
+    function getIntOrZero(data, field) {
+      return (field in data && data[field] is int) ? data[field] : 0;
+    }
+
+    function hasCapacityForOneMore(eventData) {
+      return !('capacityLimit' in eventData)
+        || eventData.capacityLimit == null
+        || (eventData.rsvpCount + 1 <= eventData.capacityLimit);
+    }
+
+    function isEventAtCapacity(eventData) {
+      return ('capacityLimit' in eventData)
+        && eventData.capacityLimit != null
+        && eventData.rsvpCount >= eventData.capacityLimit;
+    }
+
+    function isRegistrationWindowOpen(eventData) {
+      return eventData.status == 'published'
+        && (!('registrationStatus' in eventData) || eventData.registrationStatus in ['open', 'full'])
+        && (!('registrationOpensAt' in eventData) || eventData.registrationOpensAt == null || request.time >= eventData.registrationOpensAt)
+        && (!('registrationClosesAt' in eventData) || eventData.registrationClosesAt == null || request.time <= eventData.registrationClosesAt)
+        && request.time < eventData.endAt;
+    }
+
+    function isEventManagerData(eventData) {
+      return isVerifiedUser()
+        && ('schoolId' in eventData)
+        && eventData.schoolId is string
+        && (
+          isSchoolAdmin(eventData.schoolId)
+          || (
+            ('clubId' in eventData)
+            && eventData.clubId is string
+            && isActiveClubOrganizer(eventData.schoolId, eventData.clubId)
+          )
+        );
+    }
+
+    function canViewEventData(eventData) {
+      return (eventData.visibility == 'public' && eventData.status in ['published', 'cancelled'])
+        || (isVerifiedUser()
+          && ('schoolId' in eventData)
+          && eventData.schoolId is string
+          && eventData.status in ['published', 'cancelled']
+          && isActiveSchoolMember(eventData.schoolId))
+        || (isVerifiedUser() && ('createdBy' in eventData) && eventData.createdBy == request.auth.uid)
+        || isEventManagerData(eventData);
+    }
+
+    function isEligibleForFeedback(eventId, uid) {
+      return (exists(eventRegistrationPath(eventId, uid)) && get(eventRegistrationPath(eventId, uid)).data.status == 'confirmed')
+        || exists(eventAttendeePath(eventId, uid))
+        || (exists(eventAttendancePath(eventId, uid)) && get(eventAttendancePath(eventId, uid)).data.status == 'checked_in');
     }
 
     function expectedDiscoverKey(data) {
@@ -148,16 +234,54 @@ service cloud.firestore {
         && (url.matches('^https://.*') || url.matches('^/src/assets/images/.*'));
     }
 
-    // Validation blueprint for School settings documents
+    function isValidOptionalUrl(url) {
+      return url is string && (url.size() == 0 || isValidImageUrl(url));
+    }
+
+    function isValidSchoolOnboardingChecklist(checklist) {
+      return checklist is map
+        && checklist.keys().hasAll([
+          'profileReviewed',
+          'visibilityVerified',
+          'permissionsReviewed',
+          'privacyReviewed',
+          'notificationsReviewed',
+          'launchConfirmed'
+        ])
+        && checklist.keys().hasOnly([
+          'profileReviewed',
+          'visibilityVerified',
+          'permissionsReviewed',
+          'privacyReviewed',
+          'notificationsReviewed',
+          'launchConfirmed'
+        ])
+        && checklist.profileReviewed is bool
+        && checklist.visibilityVerified is bool
+        && checklist.permissionsReviewed is bool
+        && checklist.privacyReviewed is bool
+        && checklist.notificationsReviewed is bool
+        && checklist.launchConfirmed is bool;
+    }
+
+    // Validation blueprint for School settings & Phase 7 onboarding documents
     function isValidSchool(data, schoolId) {
       return data.keys().hasAll(['id', 'name', 'timezone', 'allowPublicDiscovery', 'updatedAt', 'updatedBy'])
         && data.keys().hasOnly([
           'id',
           'name',
           'slug',
+          'logoUrl',
+          'coverImageUrl',
+          'description',
+          'location',
           'timezone',
+          'contactEmail',
+          'contactName',
           'status',
           'allowPublicDiscovery',
+          'pilotStage',
+          'onboardingChecklist',
           'createdAt',
           'updatedAt',
           'updatedBy'
@@ -166,9 +290,17 @@ service cloud.firestore {
         && data.id == schoolId
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
         && (!('slug' in data) || (data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 128 && data.slug.matches('^[a-z0-9\\-]+$')))
+        && (!('logoUrl' in data) || isValidOptionalUrl(data.logoUrl))
+        && (!('coverImageUrl' in data) || isValidOptionalUrl(data.coverImageUrl))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 600))
+        && (!('location' in data) || (data.location is string && data.location.size() <= 160))
         && data.timezone is string && data.timezone.size() >= 2 && data.timezone.size() <= 64
-        && (!('status' in data) || data.status in ['active', 'inactive'])
+        && (!('contactEmail' in data) || (data.contactEmail is string && data.contactEmail.size() <= 160))
+        && (!('contactName' in data) || (data.contactName is string && data.contactName.size() <= 120))
+        && (!('status' in data) || data.status in ['active', 'pending_setup', 'suspended', 'inactive'])
         && data.allowPublicDiscovery is bool
+        && (!('pilotStage' in data) || data.pilotStage in ['internal_validation', 'student_trial', 'club_expansion', 'school_wide'])
+        && (!('onboardingChecklist' in data) || isValidSchoolOnboardingChecklist(data.onboardingChecklist))
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && data.updatedAt is timestamp
         && isValidId(data.updatedBy);
@@ -201,6 +333,15 @@ service cloud.firestore {
         && data.status in ['active', 'suspended']
         && (!('assignedBy' in data) || isValidId(data.assignedBy))
         && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicOrganizerEntry(entry) {
+      return entry is map
+        && entry.keys().hasAll(['uid', 'displayName'])
+        && entry.keys().hasOnly(['uid', 'displayName', 'roleTitle'])
+        && isValidId(entry.uid)
+        && entry.displayName is string && entry.displayName.size() >= 1 && entry.displayName.size() <= 120
+        && (!('roleTitle' in entry) || (entry.roleTitle is string && entry.roleTitle.size() <= 80));
     }
 
     // Validation blueprint for Phase 3 Club documents
@@ -268,7 +409,7 @@ service cloud.firestore {
         && (!('meetingSchedule' in data) || (data.meetingSchedule is string && data.meetingSchedule.size() <= 120))
         && (!('meetingLocation' in data) || (data.meetingLocation is string && data.meetingLocation.size() <= 120))
         && (!('contactEmail' in data) || (data.contactEmail is string && data.contactEmail.size() <= 160))
-        && (!('publicOrganizers' in data) || (data.publicOrganizers is list && data.publicOrganizers.size() <= 8))
+        && (!('publicOrganizers' in data) || (data.publicOrganizers is list && data.publicOrganizers.size() <= 8 && (data.publicOrganizers.size() == 0 || isValidPublicOrganizerEntry(data.publicOrganizers[0]))))
         && (!('announcement' in data) || (data.announcement is string && data.announcement.size() <= 280))
         && data.followerCount is int && data.followerCount >= 0 && data.followerCount <= 100000
         && (!('isDemoSeed' in data) || data.isDemoSeed is bool)
@@ -314,8 +455,7 @@ service cloud.firestore {
         && isValidId(data.schoolId) && data.schoolId == schoolId
         && isValidId(data.clubId) && data.clubId == clubId
         && data.notificationsEnabled is bool
-        && data.createdAt is timestamp
-        && data.createdAt == request.time;
+        && data.createdAt is timestamp;
     }
 
     function isValidUserFollowedClub(data, clubId) {
@@ -326,11 +466,10 @@ service cloud.firestore {
         && data.clubName is string && data.clubName.size() >= 2 && data.clubName.size() <= 80
         && isValidClubCategory(data.clubCategory)
         && data.notificationsEnabled is bool
-        && data.followedAt is timestamp
-        && data.followedAt == request.time;
+        && data.followedAt is timestamp;
     }
 
-    // Validation blueprint for Phase 2 & 3 Event documents
+    // Validation blueprint for Phase 2, 3 & 8 Event documents
     function isValidEvent(data, eventId) {
       return data.keys().hasAll([
           'id',
@@ -374,7 +513,21 @@ service cloud.firestore {
           'discoverKey',
           'isDemoSeed',
           'cancelledAt',
-          'cancellationReason'
+          'cancellationReason',
+          'capacityLimit',
+          'registrationOpensAt',
+          'registrationClosesAt',
+          'allowWaitlist',
+          'requireApproval',
+          'registrationStatus',
+          'confirmedCount',
+          'pendingApprovalCount',
+          'waitlistCount',
+          'checkedInCount',
+          'cancelledCount',
+          'feedbackCount',
+          'feedbackRatingSum',
+          'latestAnnouncementAt'
         ])
         && isValidId(data.id)
         && data.id == eventId
@@ -400,7 +553,130 @@ service cloud.firestore {
         && data.discoverKey is string && data.discoverKey == expectedDiscoverKey(data)
         && (!('isDemoSeed' in data) || data.isDemoSeed is bool)
         && (!('cancelledAt' in data) || data.cancelledAt is timestamp)
-        && (!('cancellationReason' in data) || (data.cancellationReason is string && data.cancellationReason.size() <= 240));
+        && (!('cancellationReason' in data) || (data.cancellationReason is string && data.cancellationReason.size() <= 240))
+        && (!('capacityLimit' in data) || data.capacityLimit == null || (data.capacityLimit is int && data.capacityLimit >= 1 && data.capacityLimit <= 100000))
+        && (!('registrationOpensAt' in data) || data.registrationOpensAt == null || data.registrationOpensAt is timestamp)
+        && (!('registrationClosesAt' in data) || data.registrationClosesAt == null || data.registrationClosesAt is timestamp)
+        && (!('allowWaitlist' in data) || data.allowWaitlist is bool)
+        && (!('requireApproval' in data) || data.requireApproval is bool)
+        && (!('registrationStatus' in data) || data.registrationStatus in ['open', 'closed', 'full', 'cancelled'])
+        && (!('confirmedCount' in data) || (data.confirmedCount is int && data.confirmedCount >= 0 && data.confirmedCount <= 100000))
+        && (!('pendingApprovalCount' in data) || (data.pendingApprovalCount is int && data.pendingApprovalCount >= 0 && data.pendingApprovalCount <= 100000))
+        && (!('waitlistCount' in data) || (data.waitlistCount is int && data.waitlistCount >= 0 && data.waitlistCount <= 100000))
+        && (!('checkedInCount' in data) || (data.checkedInCount is int && data.checkedInCount >= 0 && data.checkedInCount <= 100000))
+        && (!('cancelledCount' in data) || (data.cancelledCount is int && data.cancelledCount >= 0 && data.cancelledCount <= 100000))
+        && (!('feedbackCount' in data) || (data.feedbackCount is int && data.feedbackCount >= 0 && data.feedbackCount <= 100000))
+        && (!('feedbackRatingSum' in data) || (data.feedbackRatingSum is int && data.feedbackRatingSum >= 0 && data.feedbackRatingSum <= 500000))
+        && (!('latestAnnouncementAt' in data) || data.latestAnnouncementAt is timestamp);
+    }
+
+    // Validation blueprint for Phase 8 EventRegistration documents
+    function isValidEventRegistration(data, eventId, uid) {
+      return data.keys().hasAll(['uid', 'eventId', 'schoolId', 'status', 'registeredAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid',
+          'eventId',
+          'schoolId',
+          'status',
+          'displayName',
+          'registeredAt',
+          'updatedAt',
+          'cancelledAt',
+          'waitlistTimestamp',
+          'promotedAt',
+          'offerExpiresAt',
+          'approvedBy',
+          'approvedAt'
+        ])
+        && isValidId(data.uid) && data.uid == uid
+        && isValidId(data.eventId) && data.eventId == eventId
+        && isValidId(data.schoolId)
+        && data.status in ['confirmed', 'pending_approval', 'waitlisted', 'cancelled']
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120))
+        && data.registeredAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('cancelledAt' in data) || data.cancelledAt is timestamp)
+        && (!('waitlistTimestamp' in data) || data.waitlistTimestamp is timestamp)
+        && (!('promotedAt' in data) || data.promotedAt is timestamp)
+        && (!('offerExpiresAt' in data) || data.offerExpiresAt is timestamp)
+        && (!('approvedBy' in data) || isValidId(data.approvedBy))
+        && (!('approvedAt' in data) || data.approvedAt is timestamp);
+    }
+
+    // Validation blueprint for Phase 8 EventAttendance documents (organizer-controlled only)
+    function isValidEventAttendance(data, eventId, uid) {
+      return data.keys().hasAll(['uid', 'eventId', 'schoolId', 'status', 'method', 'checkedInBy', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid',
+          'eventId',
+          'schoolId',
+          'status',
+          'method',
+          'checkedInAt',
+          'checkedInBy',
+          'updatedAt',
+          'correctionNote'
+        ])
+        && isValidId(data.uid) && data.uid == uid
+        && isValidId(data.eventId) && data.eventId == eventId
+        && isValidId(data.schoolId)
+        && data.status in ['checked_in', 'not_checked_in', 'excused']
+        && data.method in ['manual', 'qr_token']
+        && (!('checkedInAt' in data) || data.checkedInAt is timestamp)
+        && isValidId(data.checkedInBy)
+        && data.updatedAt is timestamp
+        && (!('correctionNote' in data) || (data.correctionNote is string && data.correctionNote.size() <= 240));
+    }
+
+    // Validation blueprint for Phase 8 EventAnnouncement documents
+    function isValidEventAnnouncement(data, eventId, announcementId) {
+      return data.keys().hasAll(['id', 'eventId', 'schoolId', 'title', 'message', 'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'eventId', 'schoolId', 'title', 'message', 'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && isValidId(data.id) && data.id == announcementId
+        && isValidId(data.eventId) && data.eventId == eventId
+        && isValidId(data.schoolId)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 120
+        && data.message is string && data.message.size() >= 5 && data.message.size() <= 600
+        && data.status in ['active', 'archived']
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation blueprint for Phase 8 Post-Event Feedback documents (keyed by submitter UID)
+    function isValidEventFeedback(data, eventId, uid) {
+      return data.keys().hasAll([
+          'id',
+          'eventId',
+          'schoolId',
+          'submittedBy',
+          'overallRating',
+          'organizationRating',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'eventId',
+          'schoolId',
+          'submittedBy',
+          'overallRating',
+          'organizationRating',
+          'writtenFeedback',
+          'improvementSuggestions',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id) && data.id == uid
+        && isValidId(data.eventId) && data.eventId == eventId
+        && isValidId(data.schoolId)
+        && isValidId(data.submittedBy) && data.submittedBy == uid
+        && data.overallRating is int && data.overallRating >= 1 && data.overallRating <= 5
+        && data.organizationRating is int && data.organizationRating >= 1 && data.organizationRating <= 5
+        && (!('writtenFeedback' in data) || (data.writtenFeedback is string && data.writtenFeedback.size() <= 1000))
+        && (!('improvementSuggestions' in data) || (data.improvementSuggestions is string && data.improvementSuggestions.size() <= 1000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
     // Validation blueprint for Attendee documents
@@ -573,39 +849,151 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
-    // Admin-managed membership mirror for index-free & rule-safe list queries
+    // Validation blueprint for Phase 7 UserOnboardingProgress documents (never grants roles)
+    function isValidUserOnboardingProgress(data, uid) {
+      return data.keys().hasAll([
+          'uid',
+          'schoolId',
+          'studentCompleted',
+          'studentDismissed',
+          'organizerDismissed',
+          'clubProfileReviewed',
+          'eventManagementReviewed',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'schoolId',
+          'studentCompleted',
+          'studentDismissed',
+          'organizerDismissed',
+          'clubProfileReviewed',
+          'eventManagementReviewed',
+          'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.uid == uid
+        && data.uid == request.auth.uid
+        && isValidId(data.schoolId)
+        && data.studentCompleted is bool
+        && data.studentDismissed is bool
+        && data.organizerDismissed is bool
+        && data.clubProfileReviewed is bool
+        && data.eventManagementReviewed is bool
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation blueprint for Phase 7 school-scoped private feedback submissions
+    function isValidFeedbackSubmission(data, schoolId, feedbackId) {
+      return data.keys().hasAll([
+          'id',
+          'schoolId',
+          'submittedBy',
+          'type',
+          'relatedFeature',
+          'description',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'schoolId',
+          'submittedBy',
+          'type',
+          'relatedFeature',
+          'description',
+          'status',
+          'adminNote',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.id == feedbackId
+        && isValidId(data.schoolId)
+        && data.schoolId == schoolId
+        && isValidId(data.submittedBy)
+        && data.type in ['bug', 'feature', 'usability', 'general']
+        && data.relatedFeature in [
+          'Event Discovery',
+          'Clubs',
+          'RSVPs',
+          'Notifications',
+          'Organizer Studio',
+          'Analytics',
+          'Onboarding',
+          'Other'
+        ]
+        && data.description is string && data.description.size() >= 10 && data.description.size() <= 1200
+        && data.status in ['new', 'reviewed', 'resolved']
+        && (!('adminNote' in data) || (data.adminNote is string && data.adminNote.size() <= 400))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Admin-managed membership mirror for index-free & rule-safe list queries.
+    // Split create/update prevents an admin of School B from overwriting a School A member mirror.
     match /userMemberships/{uid} {
       allow get: if isValidId(uid) && isSignedIn() && isOwner(uid);
       allow list: if false;
-      allow create, update: if isValidId(uid)
+
+      allow create: if isValidId(uid)
         && isVerifiedUser()
         && isValidUserMembership(incoming(), uid)
         && isSchoolAdmin(incoming().schoolId)
         && incoming().updatedAt == request.time
         && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid);
+
+      allow update: if isValidId(uid)
+        && isVerifiedUser()
+        && isValidUserMembership(incoming(), uid)
+        && isSchoolAdmin(existing().schoolId)
+        && incoming().uid == existing().uid
+        && incoming().schoolId == existing().schoolId
+        && incoming().updatedAt == request.time
+        && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid)
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'role',
+          'status',
+          'assignedBy',
+          'updatedAt'
+        ]);
+
       allow delete: if false;
     }
 
-    // User-scoped followed clubs & managed club assignments
+    // User-scoped followed clubs, managed club assignments, notifications, preferences, and push tokens
     match /users/{uid} {
       allow read, write: if false;
 
       match /followedClubs/{clubId} {
-        allow get, list: if isValidId(uid) && isValidId(clubId) && isSignedIn() && isOwner(uid);
+        allow get: if isValidId(uid) && isValidId(clubId) && isSignedIn() && isOwner(uid);
+
+        allow list: if isValidId(uid)
+          && isSignedIn()
+          && isOwner(uid)
+          && resource.data.clubId is string;
 
         allow create: if isValidId(uid)
           && isValidId(clubId)
           && isVerifiedUser()
           && isOwner(uid)
           && isValidUserFollowedClub(incoming(), clubId)
+          && incoming().followedAt == request.time
+          && !isSuspendedSchoolMember(incoming().schoolId)
           && existsAfter(clubFollowerPath(incoming().schoolId, clubId, uid));
 
         allow update: if isValidId(uid)
           && isValidId(clubId)
           && isVerifiedUser()
           && isOwner(uid)
-          && incoming().diff(existing()).affectedKeys().hasOnly(['notificationsEnabled'])
-          && incoming().notificationsEnabled is bool;
+          && isValidUserFollowedClub(incoming(), clubId)
+          && incoming().clubId == existing().clubId
+          && incoming().schoolId == existing().schoolId
+          && incoming().clubName == existing().clubName
+          && incoming().clubCategory == existing().clubCategory
+          && incoming().followedAt == existing().followedAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['notificationsEnabled']);
 
         allow delete: if isValidId(uid)
           && isValidId(clubId)
@@ -615,15 +1003,39 @@ service cloud.firestore {
       }
 
       match /managedClubs/{clubId} {
-        allow get, list: if isValidId(uid) && isValidId(clubId) && isVerifiedUser() && isOwner(uid);
+        allow get: if isValidId(uid) && isValidId(clubId) && isVerifiedUser() && isOwner(uid);
 
-        allow create, update: if isValidId(uid)
+        allow list: if isValidId(uid)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && resource.data.uid == request.auth.uid;
+
+        allow create: if isValidId(uid)
           && isValidId(clubId)
           && isVerifiedUser()
           && isValidManagedClubMirror(incoming(), uid, clubId)
           && isSchoolAdmin(incoming().schoolId)
           && incoming().updatedAt == request.time
           && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid);
+
+        allow update: if isValidId(uid)
+          && isValidId(clubId)
+          && isVerifiedUser()
+          && isValidManagedClubMirror(incoming(), uid, clubId)
+          && isSchoolAdmin(existing().schoolId)
+          && incoming().uid == existing().uid
+          && incoming().schoolId == existing().schoolId
+          && incoming().clubId == existing().clubId
+          && incoming().updatedAt == request.time
+          && (!('assignedBy' in incoming()) || incoming().assignedBy == request.auth.uid)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'clubName',
+            'role',
+            'roleTitle',
+            'status',
+            'assignedBy',
+            'updatedAt'
+          ]);
 
         allow delete: if false;
       }
@@ -744,9 +1156,45 @@ service cloud.firestore {
           && isVerifiedUser()
           && isOwner(uid);
       }
+
+      // Phase 7: User-owned onboarding progress (tracks tour & organizer checklist only; never grants permissions)
+      match /onboarding/{docId} {
+        allow get: if isValidId(uid)
+          && docId == 'progress'
+          && isSignedIn()
+          && isOwner(uid);
+
+        allow list: if false;
+
+        allow create: if isValidId(uid)
+          && docId == 'progress'
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidUserOnboardingProgress(incoming(), uid)
+          && incoming().updatedAt == request.time;
+
+        allow update: if isValidId(uid)
+          && docId == 'progress'
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidUserOnboardingProgress(incoming(), uid)
+          && incoming().uid == existing().uid
+          && incoming().schoolId == existing().schoolId
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'studentCompleted',
+            'studentDismissed',
+            'organizerDismissed',
+            'clubProfileReviewed',
+            'eventManagementReviewed',
+            'updatedAt'
+          ]);
+
+        allow delete: if false;
+      }
     }
 
-    // School configuration, scoped memberships, and clubs
+    // School configuration, scoped memberships, clubs, and announcements
     match /schools/{schoolId} {
       allow get: if isValidId(schoolId);
       allow list: if false;
@@ -766,22 +1214,33 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'name',
           'slug',
+          'logoUrl',
+          'coverImageUrl',
+          'description',
+          'location',
           'timezone',
+          'contactEmail',
+          'contactName',
           'status',
           'allowPublicDiscovery',
+          'pilotStage',
+          'onboardingChecklist',
           'updatedAt',
           'updatedBy'
         ]);
 
       allow delete: if false;
 
+      // Authoritative school role assignments (strictly admin-controlled; no student listing)
       match /members/{uid} {
         allow get: if isValidId(schoolId)
           && isValidId(uid)
           && isSignedIn()
           && (isOwner(uid) || isSchoolAdmin(schoolId));
 
-        allow list: if isValidId(schoolId) && isSchoolAdmin(schoolId);
+        allow list: if isValidId(schoolId)
+          && isSchoolAdmin(schoolId)
+          && resource.data.schoolId == schoolId;
 
         allow create: if isValidId(schoolId)
           && isValidId(uid)
@@ -828,7 +1287,7 @@ service cloud.firestore {
             && get(userMembershipPath()).data.status == 'active'
             && get(userMembershipPath()).data.schoolId == schoolId
             && resource.data.discoverKey == ('school:' + schoolId))
-          || isSchoolAdmin(schoolId)
+          || (isSchoolAdmin(schoolId) && resource.data.schoolId == schoolId)
         );
 
         // Only School Admins may create new clubs
@@ -843,7 +1302,7 @@ service cloud.firestore {
           && incoming().lastActivityAt == request.time;
 
         // Action-based update:
-        // (1) Atomic Follow / Unfollow followerCount +/- 1
+        // (1) Atomic Follow / Unfollow followerCount +/- 1 (suspended members blocked from +1)
         // (2) School Admin full club management (excluding followerCount & immutable IDs)
         // (3) Assigned Club Organizer permitted profile edits (cannot alter status/isOfficial/followerCount/visibility)
         allow update: if isVerifiedUser()
@@ -858,6 +1317,7 @@ service cloud.firestore {
               && (
                 (
                   existing().status == 'active'
+                  && !isSuspendedSchoolMember(schoolId)
                   && incoming().followerCount == existing().followerCount + 1
                   && !exists(clubFollowerPath(schoolId, clubId, request.auth.uid))
                   && existsAfter(clubFollowerPath(schoolId, clubId, request.auth.uid))
@@ -946,7 +1406,8 @@ service cloud.firestore {
 
           allow list: if isValidId(schoolId)
             && isValidId(clubId)
-            && isSchoolAdmin(schoolId);
+            && isSchoolAdmin(schoolId)
+            && resource.data.clubId == clubId;
 
           allow create: if isValidId(schoolId)
             && isValidId(clubId)
@@ -995,7 +1456,9 @@ service cloud.firestore {
             && isValidId(uid)
             && isVerifiedUser()
             && isOwner(uid)
+            && !isSuspendedSchoolMember(schoolId)
             && isValidClubFollower(incoming(), schoolId, clubId, uid)
+            && incoming().createdAt == request.time
             && exists(clubPath(schoolId, clubId))
             && get(clubPath(schoolId, clubId)).data.status == 'active'
             && (
@@ -1011,8 +1474,12 @@ service cloud.firestore {
             && isValidId(uid)
             && isVerifiedUser()
             && isOwner(uid)
-            && incoming().diff(existing()).affectedKeys().hasOnly(['notificationsEnabled'])
-            && incoming().notificationsEnabled is bool;
+            && isValidClubFollower(incoming(), schoolId, clubId, uid)
+            && incoming().uid == existing().uid
+            && incoming().schoolId == existing().schoolId
+            && incoming().clubId == existing().clubId
+            && incoming().createdAt == existing().createdAt
+            && incoming().diff(existing()).affectedKeys().hasOnly(['notificationsEnabled']);
 
           allow delete: if isValidId(schoolId)
             && isValidId(clubId)
@@ -1038,7 +1505,7 @@ service cloud.firestore {
             && get(userMembershipPath()).data.status == 'active'
             && get(userMembershipPath()).data.schoolId == schoolId
             && resource.data.schoolId == schoolId)
-          || isBootstrappedAdmin()
+          || (isBootstrappedAdmin(schoolId) && resource.data.schoolId == schoolId)
         );
 
         allow create: if isValidId(schoolId)
@@ -1061,6 +1528,51 @@ service cloud.firestore {
 
         allow write: if false;
       }
+
+      // Phase 7: Private school-scoped feedback submissions (submitter + school admins only)
+      match /feedback/{feedbackId} {
+        allow get: if isValidId(schoolId)
+          && isValidId(feedbackId)
+          && (
+            isSchoolAdmin(schoolId)
+            || (isSignedIn() && existing().submittedBy == request.auth.uid)
+          );
+
+        allow list: if isValidId(schoolId)
+          && isSchoolAdmin(schoolId)
+          && resource.data.schoolId == schoolId;
+
+        allow create: if isValidId(schoolId)
+          && isValidId(feedbackId)
+          && isVerifiedUser()
+          && !isSuspendedSchoolMember(schoolId)
+          && isValidFeedbackSubmission(incoming(), schoolId, feedbackId)
+          && incoming().submittedBy == request.auth.uid
+          && incoming().status == 'new'
+          && !('adminNote' in incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+
+        allow update: if isValidId(schoolId)
+          && isValidId(feedbackId)
+          && isSchoolAdmin(schoolId)
+          && isValidFeedbackSubmission(incoming(), schoolId, feedbackId)
+          && incoming().id == existing().id
+          && incoming().schoolId == existing().schoolId
+          && incoming().submittedBy == existing().submittedBy
+          && incoming().type == existing().type
+          && incoming().relatedFeature == existing().relatedFeature
+          && incoming().description == existing().description
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status',
+            'adminNote',
+            'updatedAt'
+          ]);
+
+        allow delete: if false;
+      }
     }
 
     // Events collection
@@ -1074,7 +1586,7 @@ service cloud.firestore {
           && isActiveSchoolMember(existing().schoolId))
         || (isVerifiedUser() && ('createdBy' in existing()) && existing().createdBy == request.auth.uid)
         || (isVerifiedUser() && ('schoolId' in existing()) && existing().schoolId is string && isSchoolAdmin(existing().schoolId))
-        || isBootstrappedAdmin()
+        || (!('schoolId' in existing()) && isBootstrappedAdmin('oakridge-high'))
       );
 
       allow list: if (
@@ -1091,7 +1603,8 @@ service cloud.firestore {
           && get(userMembershipPath()).data.status == 'active'
           && get(userMembershipPath()).data.role == 'admin'
           && resource.data.schoolId == get(userMembershipPath()).data.schoolId)
-        || isBootstrappedAdmin()
+        || (isBootstrappedAdmin('oakridge-high')
+          && (!('schoolId' in resource.data) || resource.data.schoolId == 'oakridge-high'))
       );
 
       // Event creation limited to assigned Club Organizers (active club) or School Admins
@@ -1116,29 +1629,40 @@ service cloud.firestore {
           || (isSchoolAdmin(incoming().schoolId) && ('isDemoSeed' in incoming()) && incoming().isDemoSeed == true)
         );
 
-      // Action-based update: (1) Student atomic RSVP, (2) Assigned Organizer/Admin edit, (3) Admin migration
+      // Action-based update:
+      // (1) Legacy atomic RSVP (capacity & window enforced)
+      // (2) Assigned Organizer/Admin event & registration settings edit
+      // (3) Legacy Phase 1 admin migration
+      // (4) Student Phase 8 atomic registration/waitlist/cancellation counter update
+      // (5) Organizer/Admin Phase 8 operational counter update (approvals, promotions, attendance, announcements)
+      // (6) Eligible participant post-event feedback counter update
       allow update: if isVerifiedUser()
         && isValidId(eventId)
         && isValidEvent(incoming(), eventId)
         && (
-          // Action 1: Atomic RSVP (+1 on published, -1 on published or cancelled)
+          // Action 1: Legacy Atomic RSVP (+1 enforces capacity & open registration; -1 on published or cancelled)
           (
             ('schoolId' in existing())
             && (existing().visibility == 'public' || isActiveSchoolMember(existing().schoolId))
-            && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpCount'])
+            && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpCount', 'confirmedCount'])
             && (
               (
-                existing().status == 'published'
+                isRegistrationWindowOpen(existing())
+                && (!('requireApproval' in existing()) || existing().requireApproval != true)
+                && hasCapacityForOneMore(existing())
+                && !isSuspendedSchoolMember(existing().schoolId)
                 && incoming().rsvpCount == existing().rsvpCount + 1
-                && !exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
-                && existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+                && (!('confirmedCount' in incoming()) || incoming().confirmedCount == incoming().rsvpCount)
+                && !exists(eventAttendeePath(eventId, request.auth.uid))
+                && existsAfter(eventAttendeePath(eventId, request.auth.uid))
               )
               || (
                 existing().status in ['published', 'cancelled']
                 && incoming().rsvpCount == existing().rsvpCount - 1
+                && (!('confirmedCount' in incoming()) || incoming().confirmedCount == incoming().rsvpCount)
                 && existing().rsvpCount >= 1
-                && exists(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
-                && !existsAfter(/databases/$(database)/documents/events/$(eventId)/attendees/$(request.auth.uid))
+                && exists(eventAttendeePath(eventId, request.auth.uid))
+                && !existsAfter(eventAttendeePath(eventId, request.auth.uid))
               )
             )
           )
@@ -1160,6 +1684,7 @@ service cloud.firestore {
             && incoming().createdAt == existing().createdAt
             && incoming().rsvpCount == existing().rsvpCount
             && incoming().updatedAt == request.time
+            && (!('capacityLimit' in incoming()) || incoming().capacityLimit == null || incoming().capacityLimit >= existing().rsvpCount)
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'title',
               'description',
@@ -1176,7 +1701,13 @@ service cloud.firestore {
               'visibility',
               'discoverKey',
               'cancelledAt',
-              'cancellationReason'
+              'cancellationReason',
+              'capacityLimit',
+              'registrationOpensAt',
+              'registrationClosesAt',
+              'allowWaitlist',
+              'requireApproval',
+              'registrationStatus'
             ])
             && (
               incoming().status != 'published'
@@ -1198,36 +1729,186 @@ service cloud.firestore {
             && incoming().rsvpCount == existing().rsvpCount
             && incoming().updatedAt == request.time
           )
+          ||
+          // Action 4: Student Phase 8 Registration / Waitlist / Cancel atomic counter reconciliation
+          (
+            ('schoolId' in existing())
+            && (existing().visibility == 'public' || isActiveSchoolMember(existing().schoolId))
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'rsvpCount',
+              'confirmedCount',
+              'pendingApprovalCount',
+              'waitlistCount',
+              'cancelledCount'
+            ])
+            && existsAfter(eventRegistrationPath(eventId, request.auth.uid))
+            && (
+              // Entering confirmed
+              (
+                getAfter(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'confirmed'
+                && (!exists(eventRegistrationPath(eventId, request.auth.uid)) || get(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'cancelled')
+                && isRegistrationWindowOpen(existing())
+                && (!('requireApproval' in existing()) || existing().requireApproval != true)
+                && hasCapacityForOneMore(existing())
+                && !isSuspendedSchoolMember(existing().schoolId)
+                && incoming().rsvpCount == existing().rsvpCount + 1
+                && getIntOrZero(incoming(), 'confirmedCount') == incoming().rsvpCount
+                && getIntOrZero(incoming(), 'pendingApprovalCount') == getIntOrZero(existing(), 'pendingApprovalCount')
+                && getIntOrZero(incoming(), 'waitlistCount') == getIntOrZero(existing(), 'waitlistCount')
+                && (
+                  !exists(eventRegistrationPath(eventId, request.auth.uid))
+                    ? getIntOrZero(incoming(), 'cancelledCount') == getIntOrZero(existing(), 'cancelledCount')
+                    : (getIntOrZero(existing(), 'cancelledCount') >= 1 && getIntOrZero(incoming(), 'cancelledCount') == getIntOrZero(existing(), 'cancelledCount') - 1)
+                )
+              )
+              ||
+              // Entering pending_approval
+              (
+                getAfter(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'pending_approval'
+                && (!exists(eventRegistrationPath(eventId, request.auth.uid)) || get(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'cancelled')
+                && isRegistrationWindowOpen(existing())
+                && ('requireApproval' in existing()) && existing().requireApproval == true
+                && hasCapacityForOneMore(existing())
+                && !isSuspendedSchoolMember(existing().schoolId)
+                && incoming().rsvpCount == existing().rsvpCount
+                && getIntOrZero(incoming(), 'confirmedCount') == getIntOrZero(existing(), 'confirmedCount')
+                && getIntOrZero(incoming(), 'pendingApprovalCount') == getIntOrZero(existing(), 'pendingApprovalCount') + 1
+                && getIntOrZero(incoming(), 'waitlistCount') == getIntOrZero(existing(), 'waitlistCount')
+                && (
+                  !exists(eventRegistrationPath(eventId, request.auth.uid))
+                    ? getIntOrZero(incoming(), 'cancelledCount') == getIntOrZero(existing(), 'cancelledCount')
+                    : (getIntOrZero(existing(), 'cancelledCount') >= 1 && getIntOrZero(incoming(), 'cancelledCount') == getIntOrZero(existing(), 'cancelledCount') - 1)
+                )
+              )
+              ||
+              // Entering waitlisted (strictly when full and allowWaitlist == true)
+              (
+                getAfter(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'waitlisted'
+                && (!exists(eventRegistrationPath(eventId, request.auth.uid)) || get(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'cancelled')
+                && isRegistrationWindowOpen(existing())
+                && ('allowWaitlist' in existing()) && existing().allowWaitlist == true
+                && isEventAtCapacity(existing())
+                && !isSuspendedSchoolMember(existing().schoolId)
+                && incoming().rsvpCount == existing().rsvpCount
+                && getIntOrZero(incoming(), 'confirmedCount') == getIntOrZero(existing(), 'confirmedCount')
+                && getIntOrZero(incoming(), 'pendingApprovalCount') == getIntOrZero(existing(), 'pendingApprovalCount')
+                && getIntOrZero(incoming(), 'waitlistCount') == getIntOrZero(existing(), 'waitlistCount') + 1
+                && (
+                  !exists(eventRegistrationPath(eventId, request.auth.uid))
+                    ? getIntOrZero(incoming(), 'cancelledCount') == getIntOrZero(existing(), 'cancelledCount')
+                    : (getIntOrZero(existing(), 'cancelledCount') >= 1 && getIntOrZero(incoming(), 'cancelledCount') == getIntOrZero(existing(), 'cancelledCount') - 1)
+                )
+              )
+              ||
+              // Student cancelling confirmed / pending_approval / waitlisted
+              (
+                exists(eventRegistrationPath(eventId, request.auth.uid))
+                && getAfter(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'cancelled'
+                && existing().status in ['published', 'cancelled']
+                && getIntOrZero(incoming(), 'cancelledCount') == getIntOrZero(existing(), 'cancelledCount') + 1
+                && (
+                  (
+                    get(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'confirmed'
+                    && existing().rsvpCount >= 1
+                    && incoming().rsvpCount == existing().rsvpCount - 1
+                    && getIntOrZero(incoming(), 'confirmedCount') == incoming().rsvpCount
+                    && getIntOrZero(incoming(), 'pendingApprovalCount') == getIntOrZero(existing(), 'pendingApprovalCount')
+                    && getIntOrZero(incoming(), 'waitlistCount') == getIntOrZero(existing(), 'waitlistCount')
+                  )
+                  || (
+                    get(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'pending_approval'
+                    && incoming().rsvpCount == existing().rsvpCount
+                    && getIntOrZero(existing(), 'pendingApprovalCount') >= 1
+                    && getIntOrZero(incoming(), 'pendingApprovalCount') == getIntOrZero(existing(), 'pendingApprovalCount') - 1
+                    && getIntOrZero(incoming(), 'waitlistCount') == getIntOrZero(existing(), 'waitlistCount')
+                  )
+                  || (
+                    get(eventRegistrationPath(eventId, request.auth.uid)).data.status == 'waitlisted'
+                    && incoming().rsvpCount == existing().rsvpCount
+                    && getIntOrZero(existing(), 'waitlistCount') >= 1
+                    && getIntOrZero(incoming(), 'waitlistCount') == getIntOrZero(existing(), 'waitlistCount') - 1
+                    && getIntOrZero(incoming(), 'pendingApprovalCount') == getIntOrZero(existing(), 'pendingApprovalCount')
+                  )
+                )
+              )
+            )
+          )
+          ||
+          // Action 5: Authorized Event Organizer / School Admin operational counters & registration controls
+          (
+            isEventManagerData(existing())
+            && incoming().id == existing().id
+            && incoming().schoolId == existing().schoolId
+            && incoming().clubId == existing().clubId
+            && incoming().createdBy == existing().createdBy
+            && incoming().createdAt == existing().createdAt
+            && (!('capacityLimit' in incoming()) || incoming().capacityLimit == null || incoming().capacityLimit >= incoming().rsvpCount)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'rsvpCount',
+              'confirmedCount',
+              'pendingApprovalCount',
+              'waitlistCount',
+              'checkedInCount',
+              'cancelledCount',
+              'capacityLimit',
+              'allowWaitlist',
+              'requireApproval',
+              'registrationStatus',
+              'registrationOpensAt',
+              'registrationClosesAt',
+              'latestAnnouncementAt',
+              'updatedAt'
+            ])
+          )
+          ||
+          // Action 6: Eligible participant post-event feedback counter increment (+1)
+          (
+            ('schoolId' in existing())
+            && existing().status == 'published'
+            && request.time >= existing().endAt
+            && !isSuspendedSchoolMember(existing().schoolId)
+            && isEligibleForFeedback(eventId, request.auth.uid)
+            && !exists(eventFeedbackPath(eventId, request.auth.uid))
+            && existsAfter(eventFeedbackPath(eventId, request.auth.uid))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['feedbackCount', 'feedbackRatingSum'])
+            && getIntOrZero(incoming(), 'feedbackCount') == getIntOrZero(existing(), 'feedbackCount') + 1
+            && getIntOrZero(incoming(), 'feedbackRatingSum')
+              == getIntOrZero(existing(), 'feedbackRatingSum') + getAfter(eventFeedbackPath(eventId, request.auth.uid)).data.overallRating
+          )
         );
 
       // Soft cancellation only; arbitrary deletion from client is prohibited
       allow delete: if false;
 
-      // Attendees subcollection (keyed by student UID)
+      // Legacy Attendees subcollection (keyed by student UID; listing strictly denied; capacity enforced)
       match /attendees/{attendeeId} {
         allow get: if isSignedIn()
           && isValidId(eventId)
           && isValidId(attendeeId)
           && isOwner(attendeeId)
-          && exists(/databases/$(database)/documents/events/$(eventId));
+          && exists(eventPath(eventId));
 
         // Deny listing all attendees to prevent student enumeration
         allow list: if false;
 
-        // Action: Create own RSVP record atomically with parent rsvpCount + 1 (published events only)
+        // Action: Create own RSVP record atomically with parent rsvpCount + 1 (capacity & window enforced)
         allow create: if isVerifiedUser()
           && isValidId(eventId)
           && isValidId(attendeeId)
           && isOwner(attendeeId)
           && isValidAttendee(incoming(), attendeeId)
-          && exists(/databases/$(database)/documents/events/$(eventId))
-          && get(/databases/$(database)/documents/events/$(eventId)).data.status == 'published'
+          && exists(eventPath(eventId))
+          && !exists(eventRegistrationPath(eventId, attendeeId))
+          && isRegistrationWindowOpen(get(eventPath(eventId)).data)
+          && (!('requireApproval' in get(eventPath(eventId)).data) || get(eventPath(eventId)).data.requireApproval != true)
+          && hasCapacityForOneMore(get(eventPath(eventId)).data)
+          && !isSuspendedSchoolMember(get(eventPath(eventId)).data.schoolId)
           && (
-            get(/databases/$(database)/documents/events/$(eventId)).data.visibility == 'public'
-            || isActiveSchoolMember(get(/databases/$(database)/documents/events/$(eventId)).data.schoolId)
+            get(eventPath(eventId)).data.visibility == 'public'
+            || isActiveSchoolMember(get(eventPath(eventId)).data.schoolId)
           )
-          && getAfter(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount
-            == get(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount + 1;
+          && getAfter(eventPath(eventId)).data.rsvpCount
+            == get(eventPath(eventId)).data.rsvpCount + 1;
 
         allow update: if false;
 
@@ -1236,10 +1917,290 @@ service cloud.firestore {
           && isValidId(eventId)
           && isValidId(attendeeId)
           && isOwner(attendeeId)
-          && exists(/databases/$(database)/documents/events/$(eventId))
-          && get(/databases/$(database)/documents/events/$(eventId)).data.status in ['published', 'cancelled']
-          && getAfter(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount
-            == get(/databases/$(database)/documents/events/$(eventId)).data.rsvpCount - 1;
+          && exists(eventPath(eventId))
+          && get(eventPath(eventId)).data.status in ['published', 'cancelled']
+          && getAfter(eventPath(eventId)).data.rsvpCount
+            == get(eventPath(eventId)).data.rsvpCount - 1;
+      }
+
+      // Phase 8: Student Event Registrations & Waitlists (strictly owner or authorized organizer/admin)
+      match /registrations/{uid} {
+        allow get: if isValidId(eventId)
+          && isValidId(uid)
+          && isSignedIn()
+          && exists(eventPath(eventId))
+          && (
+            isOwner(uid)
+            || isEventManagerData(get(eventPath(eventId)).data)
+          );
+
+        allow list: if isValidId(eventId)
+          && exists(eventPath(eventId))
+          && isEventManagerData(get(eventPath(eventId)).data)
+          && resource.data.eventId == eventId;
+
+        allow create: if isValidId(eventId)
+          && isValidId(uid)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidEventRegistration(incoming(), eventId, uid)
+          && exists(eventPath(eventId))
+          && !exists(eventAttendeePath(eventId, uid))
+          && incoming().schoolId == get(eventPath(eventId)).data.schoolId
+          && !isSuspendedSchoolMember(incoming().schoolId)
+          && (
+            get(eventPath(eventId)).data.visibility == 'public'
+            || isActiveSchoolMember(incoming().schoolId)
+          )
+          && isRegistrationWindowOpen(get(eventPath(eventId)).data)
+          && incoming().registeredAt == request.time
+          && incoming().updatedAt == request.time
+          && !('approvedBy' in incoming())
+          && !('approvedAt' in incoming())
+          && !('promotedAt' in incoming())
+          && (
+            (
+              incoming().status == 'confirmed'
+              && (!('requireApproval' in get(eventPath(eventId)).data) || get(eventPath(eventId)).data.requireApproval != true)
+              && hasCapacityForOneMore(get(eventPath(eventId)).data)
+              && getAfter(eventPath(eventId)).data.rsvpCount == get(eventPath(eventId)).data.rsvpCount + 1
+            )
+            || (
+              incoming().status == 'pending_approval'
+              && ('requireApproval' in get(eventPath(eventId)).data) && get(eventPath(eventId)).data.requireApproval == true
+              && hasCapacityForOneMore(get(eventPath(eventId)).data)
+              && getIntOrZero(getAfter(eventPath(eventId)).data, 'pendingApprovalCount')
+                == getIntOrZero(get(eventPath(eventId)).data, 'pendingApprovalCount') + 1
+            )
+            || (
+              incoming().status == 'waitlisted'
+              && ('allowWaitlist' in get(eventPath(eventId)).data) && get(eventPath(eventId)).data.allowWaitlist == true
+              && isEventAtCapacity(get(eventPath(eventId)).data)
+              && ('waitlistTimestamp' in incoming()) && incoming().waitlistTimestamp == request.time
+              && getIntOrZero(getAfter(eventPath(eventId)).data, 'waitlistCount')
+                == getIntOrZero(get(eventPath(eventId)).data, 'waitlistCount') + 1
+            )
+          );
+
+        allow update: if isValidId(eventId)
+          && isValidId(uid)
+          && isVerifiedUser()
+          && isValidEventRegistration(incoming(), eventId, uid)
+          && exists(eventPath(eventId))
+          && incoming().uid == existing().uid
+          && incoming().eventId == existing().eventId
+          && incoming().schoolId == existing().schoolId
+          && incoming().registeredAt == existing().registeredAt
+          && incoming().updatedAt == request.time
+          && (
+            // Student cancels own active registration or leaves waitlist (bound atomically to parent counters)
+            (
+              isOwner(uid)
+              && existing().status in ['confirmed', 'pending_approval', 'waitlisted']
+              && incoming().status == 'cancelled'
+              && ('cancelledAt' in incoming()) && incoming().cancelledAt == request.time
+              && get(eventPath(eventId)).data.status in ['published', 'cancelled']
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'cancelledAt', 'updatedAt'])
+              && getIntOrZero(getAfter(eventPath(eventId)).data, 'cancelledCount')
+                == getIntOrZero(get(eventPath(eventId)).data, 'cancelledCount') + 1
+              && (
+                existing().status != 'confirmed'
+                || getAfter(eventPath(eventId)).data.rsvpCount == get(eventPath(eventId)).data.rsvpCount - 1
+              )
+            )
+            ||
+            // Student re-registers after previously cancelling
+            (
+              isOwner(uid)
+              && existing().status == 'cancelled'
+              && !isSuspendedSchoolMember(existing().schoolId)
+              && isRegistrationWindowOpen(get(eventPath(eventId)).data)
+              && !('approvedBy' in incoming())
+              && (
+                (
+                  incoming().status == 'confirmed'
+                  && (!('requireApproval' in get(eventPath(eventId)).data) || get(eventPath(eventId)).data.requireApproval != true)
+                  && hasCapacityForOneMore(get(eventPath(eventId)).data)
+                  && getAfter(eventPath(eventId)).data.rsvpCount == get(eventPath(eventId)).data.rsvpCount + 1
+                )
+                || (
+                  incoming().status == 'pending_approval'
+                  && ('requireApproval' in get(eventPath(eventId)).data) && get(eventPath(eventId)).data.requireApproval == true
+                  && hasCapacityForOneMore(get(eventPath(eventId)).data)
+                  && getIntOrZero(getAfter(eventPath(eventId)).data, 'pendingApprovalCount')
+                    == getIntOrZero(get(eventPath(eventId)).data, 'pendingApprovalCount') + 1
+                )
+                || (
+                  incoming().status == 'waitlisted'
+                  && ('allowWaitlist' in get(eventPath(eventId)).data) && get(eventPath(eventId)).data.allowWaitlist == true
+                  && isEventAtCapacity(get(eventPath(eventId)).data)
+                  && ('waitlistTimestamp' in incoming()) && incoming().waitlistTimestamp == request.time
+                  && getIntOrZero(getAfter(eventPath(eventId)).data, 'waitlistCount')
+                    == getIntOrZero(get(eventPath(eventId)).data, 'waitlistCount') + 1
+                )
+              )
+            )
+            ||
+            // Authorized Event Organizer / School Admin approves pending, promotes waitlisted, sets offer expiry, or cancels
+            (
+              isEventManagerData(get(eventPath(eventId)).data)
+              && (
+                (
+                  existing().status in ['pending_approval', 'waitlisted']
+                  && incoming().status == 'confirmed'
+                  && hasCapacityForOneMore(get(eventPath(eventId)).data)
+                  && ('approvedBy' in incoming()) && incoming().approvedBy == request.auth.uid
+                  && getAfter(eventPath(eventId)).data.rsvpCount == get(eventPath(eventId)).data.rsvpCount + 1
+                )
+                || (
+                  existing().status == 'waitlisted'
+                  && incoming().status == 'waitlisted'
+                  && incoming().diff(existing()).affectedKeys().hasOnly(['offerExpiresAt', 'updatedAt'])
+                )
+                || (
+                  existing().status in ['confirmed', 'pending_approval', 'waitlisted']
+                  && incoming().status == 'cancelled'
+                  && ('cancelledAt' in incoming()) && incoming().cancelledAt == request.time
+                )
+              )
+            )
+          );
+
+        allow delete: if false;
+      }
+
+      // Phase 8: Organizer-Controlled Attendance & Check-In Records (students can NEVER write)
+      match /attendance/{uid} {
+        allow get: if isValidId(eventId)
+          && isValidId(uid)
+          && isSignedIn()
+          && exists(eventPath(eventId))
+          && (
+            isOwner(uid)
+            || isEventManagerData(get(eventPath(eventId)).data)
+          );
+
+        allow list: if isValidId(eventId)
+          && exists(eventPath(eventId))
+          && isEventManagerData(get(eventPath(eventId)).data)
+          && resource.data.eventId == eventId;
+
+        allow create: if isValidId(eventId)
+          && isValidId(uid)
+          && isValidEventAttendance(incoming(), eventId, uid)
+          && exists(eventPath(eventId))
+          && isEventManagerData(get(eventPath(eventId)).data)
+          && incoming().schoolId == get(eventPath(eventId)).data.schoolId
+          && incoming().checkedInBy == request.auth.uid
+          && incoming().updatedAt == request.time;
+
+        allow update: if isValidId(eventId)
+          && isValidId(uid)
+          && isValidEventAttendance(incoming(), eventId, uid)
+          && exists(eventPath(eventId))
+          && isEventManagerData(get(eventPath(eventId)).data)
+          && incoming().uid == existing().uid
+          && incoming().eventId == existing().eventId
+          && incoming().schoolId == existing().schoolId
+          && incoming().checkedInBy == request.auth.uid
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status',
+            'method',
+            'checkedInAt',
+            'checkedInBy',
+            'correctionNote',
+            'updatedAt'
+          ]);
+
+        allow delete: if false;
+      }
+
+      // Phase 8: Event-Specific Announcements (authorized event organizers/admins write; event viewers read active)
+      match /announcements/{announcementId} {
+        allow get: if isValidId(eventId)
+          && isValidId(announcementId)
+          && exists(eventPath(eventId))
+          && canViewEventData(get(eventPath(eventId)).data)
+          && (
+            existing().status == 'active'
+            || isEventManagerData(get(eventPath(eventId)).data)
+          );
+
+        allow list: if isValidId(eventId)
+          && exists(eventPath(eventId))
+          && canViewEventData(get(eventPath(eventId)).data)
+          && resource.data.eventId == eventId
+          && (
+            resource.data.status == 'active'
+            || isEventManagerData(get(eventPath(eventId)).data)
+          );
+
+        allow create: if isValidId(eventId)
+          && isValidId(announcementId)
+          && isValidEventAnnouncement(incoming(), eventId, announcementId)
+          && exists(eventPath(eventId))
+          && isEventManagerData(get(eventPath(eventId)).data)
+          && incoming().schoolId == get(eventPath(eventId)).data.schoolId
+          && incoming().createdBy == request.auth.uid
+          && incoming().status == 'active'
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+
+        allow update: if isValidId(eventId)
+          && isValidId(announcementId)
+          && isValidEventAnnouncement(incoming(), eventId, announcementId)
+          && exists(eventPath(eventId))
+          && isEventManagerData(get(eventPath(eventId)).data)
+          && incoming().id == existing().id
+          && incoming().eventId == existing().eventId
+          && incoming().schoolId == existing().schoolId
+          && incoming().createdBy == existing().createdBy
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title',
+            'message',
+            'status',
+            'updatedAt'
+          ]);
+
+        allow delete: if false;
+      }
+
+      // Phase 8: Post-Event Feedback (one per eligible participant after event ends; private from other students)
+      match /feedback/{uid} {
+        allow get: if isValidId(eventId)
+          && isValidId(uid)
+          && isSignedIn()
+          && exists(eventPath(eventId))
+          && (
+            isOwner(uid)
+            || isEventManagerData(get(eventPath(eventId)).data)
+          );
+
+        allow list: if isValidId(eventId)
+          && exists(eventPath(eventId))
+          && isEventManagerData(get(eventPath(eventId)).data)
+          && resource.data.eventId == eventId;
+
+        allow create: if isValidId(eventId)
+          && isValidId(uid)
+          && isVerifiedUser()
+          && isOwner(uid)
+          && isValidEventFeedback(incoming(), eventId, uid)
+          && exists(eventPath(eventId))
+          && get(eventPath(eventId)).data.status == 'published'
+          && request.time >= get(eventPath(eventId)).data.endAt
+          && incoming().schoolId == get(eventPath(eventId)).data.schoolId
+          && !isSuspendedSchoolMember(incoming().schoolId)
+          && isEligibleForFeedback(eventId, uid)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && getIntOrZero(getAfter(eventPath(eventId)).data, 'feedbackCount')
+            == getIntOrZero(get(eventPath(eventId)).data, 'feedbackCount') + 1;
+
+        allow update, delete: if false;
       }
     }
   }

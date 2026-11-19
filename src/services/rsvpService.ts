@@ -1,13 +1,20 @@
 import {
   doc,
   getDoc,
+  getDocFromServer,
   increment,
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import type { SchoolEvent } from '../types/event';
-import { RSVP_TIMEOUT_MS, withTimeout } from '../utils/rsvp';
+import {
+  canToggleEventRsvp,
+  RSVP_RECONCILE_TIMEOUT_MS,
+  RSVP_TIMEOUT_MS,
+  withTimeout,
+  type AuthoritativeRsvpState,
+} from '../utils/rsvp';
 
 export async function fetchUserRsvps(
   eventIds: string[],
@@ -34,16 +41,32 @@ export async function fetchUserRsvps(
   return Object.fromEntries(entries);
 }
 
+/**
+ * Reads authoritative RSVP state directly from the Firestore server (bypassing stale local cache)
+ * to confirm whether an uncertain or timed-out RSVP commit actually persisted.
+ */
 export async function reconcileEventRsvp(
   eventId: string,
   uid: string
-): Promise<{ isGoing: boolean; rsvpCount?: number }> {
+): Promise<AuthoritativeRsvpState> {
+  const attendeeRef = doc(db, 'events', eventId, 'attendees', uid);
+  const eventRef = doc(db, 'events', eventId);
+
+  const readAuthoritative = async () => {
+    try {
+      return await Promise.all([
+        getDocFromServer(attendeeRef),
+        getDocFromServer(eventRef),
+      ]);
+    } catch {
+      // Fallback to standard getDoc if server-forced read is temporarily unavailable
+      return await Promise.all([getDoc(attendeeRef), getDoc(eventRef)]);
+    }
+  };
+
   const [attendeeSnap, eventSnap] = await withTimeout(
-    Promise.all([
-      getDoc(doc(db, 'events', eventId, 'attendees', uid)),
-      getDoc(doc(db, 'events', eventId)),
-    ]),
-    RSVP_TIMEOUT_MS,
+    readAuthoritative(),
+    RSVP_RECONCILE_TIMEOUT_MS,
     'Connection timed out'
   );
 
@@ -62,16 +85,9 @@ export async function toggleEventRsvp(
   uid: string,
   currentlyGoing: boolean
 ): Promise<void> {
-  if (!currentlyGoing && event.status !== 'published') {
-    throw new Error(
-      event.status === 'cancelled'
-        ? 'This event has been cancelled and is no longer accepting RSVPs.'
-        : 'Draft events cannot accept RSVPs.'
-    );
-  }
-
-  if (currentlyGoing && event.status === 'draft') {
-    throw new Error('Draft events cannot be modified by students.');
+  const eligibility = canToggleEventRsvp(event, currentlyGoing);
+  if (!eligibility.allowed) {
+    throw new Error(eligibility.reason || 'This event is not accepting RSVPs.');
   }
 
   const attendeePath = `events/${event.id}/attendees/${uid}`;
@@ -94,7 +110,7 @@ export async function toggleEventRsvp(
   };
 
   try {
-    await withTimeout(commitOperation(), RSVP_TIMEOUT_MS, 'Connection failed.');
+    await withTimeout(commitOperation(), RSVP_TIMEOUT_MS, 'Connection timed out.');
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, attendeePath);
   }

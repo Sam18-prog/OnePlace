@@ -25,6 +25,36 @@
           "minLength": 2,
           "maxLength": 128
         },
+        "logoUrl": {
+          "type": "string",
+          "description": "Optional validated HTTPS URL or curated asset path for the school logo.",
+          "maxLength": 500
+        },
+        "coverImageUrl": {
+          "type": "string",
+          "description": "Optional validated HTTPS URL or curated asset path for the school cover banner.",
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "description": "Short public description of the school campus community.",
+          "maxLength": 600
+        },
+        "location": {
+          "type": "string",
+          "description": "Optional city/state or campus location label.",
+          "maxLength": 160
+        },
+        "contactEmail": {
+          "type": "string",
+          "description": "Optional school activities or support contact email.",
+          "maxLength": 160
+        },
+        "contactName": {
+          "type": "string",
+          "description": "Optional campus contact office or coordinator title.",
+          "maxLength": 120
+        },
         "timezone": {
           "type": "string",
           "description": "IANA timezone identifier used as default for school events.",
@@ -33,8 +63,25 @@
         },
         "status": {
           "type": "string",
-          "enum": ["active", "inactive"],
+          "enum": ["active", "pending_setup", "suspended", "inactive"],
           "description": "Operational status of the school campus."
+        },
+        "pilotStage": {
+          "type": "string",
+          "enum": ["internal_validation", "student_trial", "club_expansion", "school_wide"],
+          "description": "Current staged rollout pilot phase for this school."
+        },
+        "onboardingChecklist": {
+          "type": "object",
+          "description": "Admin-confirmed setup review checkpoints.",
+          "properties": {
+            "profileReviewed": { "type": "boolean" },
+            "visibilityVerified": { "type": "boolean" },
+            "permissionsReviewed": { "type": "boolean" },
+            "privacyReviewed": { "type": "boolean" },
+            "notificationsReviewed": { "type": "boolean" },
+            "launchConfirmed": { "type": "boolean" }
+          }
         },
         "allowPublicDiscovery": {
           "type": "boolean",
@@ -507,6 +554,66 @@
           "type": "string",
           "description": "Optional organizer note explaining why the event was cancelled.",
           "maxLength": 240
+        },
+        "capacityLimit": {
+          "type": "integer",
+          "description": "Optional maximum confirmed registration capacity (1..100000); omitted or null for unlimited."
+        },
+        "registrationOpensAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional timestamp when registration opens."
+        },
+        "registrationClosesAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional timestamp when registration closes."
+        },
+        "allowWaitlist": {
+          "type": "boolean",
+          "description": "Whether students can join a FIFO waitlist when capacity is reached."
+        },
+        "requireApproval": {
+          "type": "boolean",
+          "description": "Whether new registrations require organizer approval before confirmation."
+        },
+        "registrationStatus": {
+          "type": "string",
+          "enum": ["open", "closed", "full", "cancelled"],
+          "description": "Current operational registration state of the event."
+        },
+        "confirmedCount": {
+          "type": "integer",
+          "description": "Confirmed registrations count synchronized with rsvpCount."
+        },
+        "pendingApprovalCount": {
+          "type": "integer",
+          "description": "Number of registrations awaiting organizer approval."
+        },
+        "waitlistCount": {
+          "type": "integer",
+          "description": "Number of students currently on the waitlist."
+        },
+        "checkedInCount": {
+          "type": "integer",
+          "description": "Number of confirmed attendees checked in by an authorized organizer."
+        },
+        "cancelledCount": {
+          "type": "integer",
+          "description": "Number of cancelled registrations."
+        },
+        "feedbackCount": {
+          "type": "integer",
+          "description": "Total post-event feedback responses submitted."
+        },
+        "feedbackRatingSum": {
+          "type": "integer",
+          "description": "Cumulative sum of overall ratings (1..5) for post-event feedback."
+        },
+        "latestAnnouncementAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the most recent active event announcement."
         }
       },
       "required": [
@@ -529,6 +636,79 @@
         "rsvpCount",
         "discoverKey"
       ]
+    },
+    "EventRegistration": {
+      "title": "EventRegistration",
+      "description": "Student registration or waitlist record keyed by student UID under an event.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "eventId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["confirmed", "pending_approval", "waitlisted", "cancelled"] },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "registeredAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "cancelledAt": { "type": "string", "format": "date-time" },
+        "waitlistTimestamp": { "type": "string", "format": "date-time" },
+        "promotedAt": { "type": "string", "format": "date-time" },
+        "offerExpiresAt": { "type": "string", "format": "date-time" },
+        "approvedBy": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "approvedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "eventId", "schoolId", "status", "registeredAt", "updatedAt"]
+    },
+    "EventAttendance": {
+      "title": "EventAttendance",
+      "description": "Organizer-recorded attendance and check-in record keyed by student UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "eventId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["checked_in", "not_checked_in", "excused"] },
+        "method": { "type": "string", "enum": ["manual", "qr_token"] },
+        "checkedInAt": { "type": "string", "format": "date-time" },
+        "checkedInBy": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "correctionNote": { "type": "string", "maxLength": 240 }
+      },
+      "required": ["uid", "eventId", "schoolId", "status", "method", "checkedInBy", "updatedAt"]
+    },
+    "EventAnnouncement": {
+      "title": "EventAnnouncement",
+      "description": "Event-specific operational update published by an authorized organizer or school admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "eventId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "message": { "type": "string", "minLength": 5, "maxLength": 600 },
+        "status": { "type": "string", "enum": ["active", "archived"] },
+        "createdBy": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "eventId", "schoolId", "title", "message", "status", "createdBy", "createdAt", "updatedAt"]
+    },
+    "EventFeedback": {
+      "title": "EventFeedback",
+      "description": "Post-event participant feedback keyed by submitter UID to prevent duplicates; private from other students.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "eventId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "submittedBy": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "overallRating": { "type": "integer" },
+        "organizationRating": { "type": "integer" },
+        "writtenFeedback": { "type": "string", "maxLength": 1000 },
+        "improvementSuggestions": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "eventId", "schoolId", "submittedBy", "overallRating", "organizationRating", "createdAt", "updatedAt"]
     },
     "Attendee": {
       "title": "Attendee",
@@ -939,6 +1119,40 @@
         }
       },
       "required": ["id", "schoolId", "title", "message", "priority", "createdBy", "createdAt"]
+    },
+    "FeedbackSubmission": {
+      "title": "FeedbackSubmission",
+      "description": "Private school-scoped user feedback submission readable only by the submitter and school admins.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "submittedBy": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["bug", "feature", "usability", "general"] },
+        "relatedFeature": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "description": { "type": "string", "minLength": 10, "maxLength": 1200 },
+        "status": { "type": "string", "enum": ["new", "reviewed", "resolved"] },
+        "adminNote": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "submittedBy", "type", "relatedFeature", "description", "status", "createdAt", "updatedAt"]
+    },
+    "UserOnboardingProgress": {
+      "title": "UserOnboardingProgress",
+      "description": "Per-user UI onboarding checklist progress document (contains zero RBAC or privilege fields).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "schoolId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "studentCompleted": { "type": "boolean" },
+        "studentDismissed": { "type": "boolean" },
+        "organizerDismissed": { "type": "boolean" },
+        "clubProfileReviewed": { "type": "boolean" },
+        "eventManagementReviewed": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "schoolId", "studentCompleted", "studentDismissed", "organizerDismissed", "clubProfileReviewed", "eventManagementReviewed", "updatedAt"]
     }
   },
   "firestore": {
@@ -998,9 +1212,33 @@
       "schema": { "$ref": "#/entities/Event" },
       "description": "Campus events linked to real club documents and managed by authorized organizers and administrators."
     },
+    "/schools/{schoolId}/feedback/{feedbackId}": {
+      "schema": { "$ref": "#/entities/FeedbackSubmission" },
+      "description": "School-scoped user feedback records reviewed by school administrators."
+    },
+    "/users/{uid}/onboarding/{docId}": {
+      "schema": { "$ref": "#/entities/UserOnboardingProgress" },
+      "description": "Owner-only onboarding progress document (docId == 'progress')."
+    },
     "/events/{eventId}/attendees/{attendeeId}": {
       "schema": { "$ref": "#/entities/Attendee" },
-      "description": "Subcollection tracking individual student RSVPs keyed by Firebase Auth UID."
+      "description": "Legacy subcollection tracking individual student RSVPs keyed by Firebase Auth UID."
+    },
+    "/events/{eventId}/registrations/{uid}": {
+      "schema": { "$ref": "#/entities/EventRegistration" },
+      "description": "Phase 8 student registration and waitlist records keyed by Firebase Auth UID."
+    },
+    "/events/{eventId}/attendance/{uid}": {
+      "schema": { "$ref": "#/entities/EventAttendance" },
+      "description": "Phase 8 organizer-managed attendance and check-in records keyed by Firebase Auth UID."
+    },
+    "/events/{eventId}/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/EventAnnouncement" },
+      "description": "Phase 8 organizer-published event announcements visible to authorized event viewers."
+    },
+    "/events/{eventId}/feedback/{uid}": {
+      "schema": { "$ref": "#/entities/EventFeedback" },
+      "description": "Phase 8 post-event participant feedback keyed by submitter UID."
     }
   }
 }

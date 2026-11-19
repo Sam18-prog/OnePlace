@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { motion } from 'motion/react';
 import { X } from 'lucide-react';
 import type { Club } from '../types/club';
 import type { SchoolEvent } from '../types/event';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface SignInPromptModalProps {
   isOpen: boolean;
@@ -23,32 +24,16 @@ export function SignInPromptModal({
   onConfirmSignIn,
   onClose,
 }: SignInPromptModalProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    previousFocusRef.current = document.activeElement as HTMLElement | null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const focusTimer = window.setTimeout(() => {
-      closeButtonRef.current?.focus();
-    }, 20);
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previousFocusRef.current?.focus?.();
-    };
-  }, [isOpen, onClose]);
+  useFocusTrap({
+    isOpen,
+    containerRef: dialogRef,
+    initialFocusRef: closeButtonRef,
+    onClose,
+    disableEscape: isSigningIn,
+  });
 
   if (!isOpen) return null;
 
@@ -61,10 +46,12 @@ export function SignInPromptModal({
       onClick={onClose}
     >
       <motion.div
+        ref={dialogRef}
+        tabIndex={-1}
         initial={{ opacity: 0, y: 14, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-2xl"
+        className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
@@ -126,7 +113,10 @@ export function SignInPromptModal({
         </p>
 
         {authError && (
-          <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+          >
             {authError}
           </p>
         )}

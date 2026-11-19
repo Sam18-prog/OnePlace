@@ -33,6 +33,9 @@ export interface EventFormErrors {
   description?: string;
   imageUrl?: string;
   visibility?: string;
+  capacityLimit?: string;
+  registrationOpensDate?: string;
+  registrationClosesDate?: string;
 }
 
 export interface EventValidationResult {
@@ -40,6 +43,9 @@ export interface EventValidationResult {
   errors: EventFormErrors;
   startAt: Date | null;
   endAt: Date | null;
+  capacityLimit: number | null;
+  registrationOpensAt: Date | null;
+  registrationClosesAt: Date | null;
 }
 
 export function slugifyClubId(hostClub: string): string {
@@ -205,6 +211,7 @@ export function validateEventForm(
     now?: Date;
     isEditingExistingPublished?: boolean;
     requireClubId?: boolean;
+    minConfirmedCount?: number;
   } = {}
 ): EventValidationResult {
   const now = options.now ?? new Date();
@@ -281,11 +288,62 @@ export function validateEventForm(
       'Newly published events cannot be in the past. Save as Draft or choose an upcoming date.';
   }
 
+  // Phase 8 optional capacity limit validation
+  let capacityLimit: number | null = null;
+  const rawCapacity = (values.capacityLimit ?? '').trim();
+  if (rawCapacity !== '') {
+    const parsed = Number(rawCapacity);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100_000) {
+      errors.capacityLimit = 'Capacity must be a whole number between 1 and 100,000.';
+    } else if (
+      typeof options.minConfirmedCount === 'number' &&
+      parsed < options.minConfirmedCount
+    ) {
+      errors.capacityLimit = `Capacity cannot be lower than the ${options.minConfirmedCount} already confirmed registrants.`;
+    } else {
+      capacityLimit = parsed;
+    }
+  }
+
+  // Phase 8 optional registration window validation
+  let registrationOpensAt: Date | null = null;
+  const rawOpensDate = (values.registrationOpensDate ?? '').trim();
+  const rawOpensTime = (values.registrationOpensTime ?? '').trim() || '00:00';
+  if (rawOpensDate) {
+    const parsed = parseSchoolDateTime(rawOpensDate, rawOpensTime, timeZone);
+    if (!parsed) {
+      errors.registrationOpensDate = 'Enter a valid registration opening date and time.';
+    } else if (endAt && parsed.getTime() >= endAt.getTime()) {
+      errors.registrationOpensDate = 'Registration must open before the event ends.';
+    } else {
+      registrationOpensAt = parsed;
+    }
+  }
+
+  let registrationClosesAt: Date | null = null;
+  const rawClosesDate = (values.registrationClosesDate ?? '').trim();
+  const rawClosesTime = (values.registrationClosesTime ?? '').trim() || '23:59';
+  if (rawClosesDate) {
+    const parsed = parseSchoolDateTime(rawClosesDate, rawClosesTime, timeZone);
+    if (!parsed) {
+      errors.registrationClosesDate = 'Enter a valid registration closing date and time.';
+    } else if (endAt && parsed.getTime() > endAt.getTime()) {
+      errors.registrationClosesDate = 'Registration cannot close after the event ends.';
+    } else if (registrationOpensAt && parsed.getTime() <= registrationOpensAt.getTime()) {
+      errors.registrationClosesDate = 'Registration closing time must be after opening time.';
+    } else {
+      registrationClosesAt = parsed;
+    }
+  }
+
   return {
     valid: Object.keys(errors).length === 0,
     errors,
     startAt,
     endAt,
+    capacityLimit,
+    registrationOpensAt,
+    registrationClosesAt,
   };
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   DatabaseZap,
+  Download,
   Globe,
   Megaphone,
   RefreshCw,
@@ -20,19 +21,32 @@ import {
   upsertSchoolMember,
 } from '../../services/membershipService';
 import { publishSchoolAnnouncement } from '../../services/notificationService';
+import type { Club } from '../../types/club';
+import type { SchoolEvent } from '../../types/event';
 import type { MemberRole, MemberStatus, SchoolMembership } from '../../types/membership';
+import type { SchoolStatus } from '../../types/school';
+import { buildSchoolBackupSnapshot, downloadSchoolBackupJson } from '../../utils/backupExport';
+import { toUserFriendlyErrorMessage } from '../../utils/errorHandling';
+import { AdminFeedbackPanel } from './AdminFeedbackPanel';
+import { CsvImportPanel } from './CsvImportPanel';
 
 interface AdminManagementPanelProps {
   schoolConfig: SchoolConfig;
   currentAdminUid: string;
+  schoolClubs?: Club[];
+  schoolEvents?: SchoolEvent[];
   onSchoolConfigUpdated: () => Promise<void>;
+  onMembersChanged?: (members: SchoolMembership[]) => void;
   onShowToast: (type: 'error' | 'success', message: string) => void;
 }
 
 export function AdminManagementPanel({
   schoolConfig,
   currentAdminUid,
+  schoolClubs = [],
+  schoolEvents = [],
   onSchoolConfigUpdated,
+  onMembersChanged,
   onShowToast,
 }: AdminManagementPanelProps) {
   const [members, setMembers] = useState<SchoolMembership[]>([]);
@@ -48,6 +62,14 @@ export function AdminManagementPanel({
   const [schoolName, setSchoolName] = useState(schoolConfig.name);
   const [schoolTimezone, setSchoolTimezone] = useState(schoolConfig.timezone);
   const [allowPublicDiscovery, setAllowPublicDiscovery] = useState(schoolConfig.allowPublicDiscovery);
+  const [schoolStatus, setSchoolStatus] = useState<SchoolStatus>(schoolConfig.status);
+  const [schoolLocation, setSchoolLocation] = useState(schoolConfig.location || '');
+  const [schoolDescription, setSchoolDescription] = useState(schoolConfig.description || '');
+  const [schoolLogoUrl, setSchoolLogoUrl] = useState(schoolConfig.logoUrl || '');
+  const [schoolCoverUrl, setSchoolCoverUrl] = useState(schoolConfig.coverImageUrl || '');
+  const [schoolContactName, setSchoolContactName] = useState(schoolConfig.contactName || '');
+  const [schoolContactEmail, setSchoolContactEmail] = useState(schoolConfig.contactEmail || '');
+  const [confirmStatusChange, setConfirmStatusChange] = useState(false);
   const [savingSchool, setSavingSchool] = useState(false);
 
   const [migrationReport, setMigrationReport] = useState<MigrationReport | null>(null);
@@ -64,15 +86,16 @@ export function AdminManagementPanel({
     try {
       const list = await listSchoolMembers(schoolConfig.id);
       setMembers(list);
+      onMembersChanged?.(list);
     } catch (err) {
       onShowToast(
         'error',
-        err instanceof Error ? err.message : 'Could not load school members list.'
+        toUserFriendlyErrorMessage(err, 'Could not load school members list.')
       );
     } finally {
       setMembersLoading(false);
     }
-  }, [onShowToast, schoolConfig.id]);
+  }, [onMembersChanged, onShowToast, schoolConfig.id]);
 
   useEffect(() => {
     void loadMembers();
@@ -82,6 +105,14 @@ export function AdminManagementPanel({
     setSchoolName(schoolConfig.name);
     setSchoolTimezone(schoolConfig.timezone);
     setAllowPublicDiscovery(schoolConfig.allowPublicDiscovery);
+    setSchoolStatus(schoolConfig.status);
+    setSchoolLocation(schoolConfig.location || '');
+    setSchoolDescription(schoolConfig.description || '');
+    setSchoolLogoUrl(schoolConfig.logoUrl || '');
+    setSchoolCoverUrl(schoolConfig.coverImageUrl || '');
+    setSchoolContactName(schoolConfig.contactName || '');
+    setSchoolContactEmail(schoolConfig.contactEmail || '');
+    setConfirmStatusChange(false);
   }, [schoolConfig]);
 
   const handleSaveMember = async (e: React.FormEvent) => {
@@ -111,7 +142,7 @@ export function AdminManagementPanel({
       setMemberEmail('');
       await loadMembers();
     } catch (err) {
-      onShowToast('error', err instanceof Error ? err.message : 'Failed to update member role.');
+      onShowToast('error', toUserFriendlyErrorMessage(err, 'Failed to update member role.'));
     } finally {
       setSavingMember(false);
     }
@@ -123,6 +154,10 @@ export function AdminManagementPanel({
       onShowToast('error', 'School name must be at least 2 characters.');
       return;
     }
+    if (schoolStatus !== schoolConfig.status && !confirmStatusChange) {
+      setConfirmStatusChange(true);
+      return;
+    }
     setSavingSchool(true);
     try {
       await saveSchoolConfig(
@@ -131,13 +166,23 @@ export function AdminManagementPanel({
           name: schoolName.trim(),
           timezone: schoolTimezone,
           allowPublicDiscovery,
+          status: schoolStatus,
+          location: schoolLocation.trim(),
+          description: schoolDescription.trim(),
+          logoUrl: schoolLogoUrl.trim(),
+          coverImageUrl: schoolCoverUrl.trim(),
+          contactName: schoolContactName.trim(),
+          contactEmail: schoolContactEmail.trim(),
+          pilotStage: schoolConfig.pilotStage,
+          onboardingChecklist: schoolConfig.onboardingChecklist,
         },
         currentAdminUid
       );
+      setConfirmStatusChange(false);
       await onSchoolConfigUpdated();
-      onShowToast('success', 'School configuration saved.');
+      onShowToast('success', 'School profile and settings saved.');
     } catch (err) {
-      onShowToast('error', err instanceof Error ? err.message : 'Could not save school settings.');
+      onShowToast('error', toUserFriendlyErrorMessage(err, 'Could not save school settings.'));
     } finally {
       setSavingSchool(false);
     }
@@ -153,7 +198,7 @@ export function AdminManagementPanel({
       );
       setMigrationReport(report);
     } catch (err) {
-      onShowToast('error', err instanceof Error ? err.message : 'Could not inspect events.');
+      onShowToast('error', toUserFriendlyErrorMessage(err, 'Could not inspect events.'));
     } finally {
       setInspectingMigration(false);
     }
@@ -178,7 +223,7 @@ export function AdminManagementPanel({
       );
       setMigrationReport(updated);
     } catch (err) {
-      onShowToast('error', err instanceof Error ? err.message : 'Migration failed.');
+      onShowToast('error', toUserFriendlyErrorMessage(err, 'Migration failed.'));
     } finally {
       setRunningMigration(false);
     }
@@ -210,11 +255,24 @@ export function AdminManagementPanel({
     } catch (err) {
       onShowToast(
         'error',
-        err instanceof Error ? err.message : 'Could not publish campus announcement.'
+        toUserFriendlyErrorMessage(err, 'Could not publish campus announcement.')
       );
     } finally {
       setPublishingAnn(false);
     }
+  };
+
+  const handleExportSchoolBackup = () => {
+    const snapshot = buildSchoolBackupSnapshot({
+      schoolConfig,
+      clubs: schoolClubs,
+      events: schoolEvents,
+    });
+    downloadSchoolBackupJson(snapshot);
+    onShowToast(
+      'success',
+      `Exported PII-free backup (${snapshot.summary.clubCount} clubs, ${snapshot.summary.eventCount} events).`
+    );
   };
 
   return (
@@ -403,6 +461,7 @@ export function AdminManagementPanel({
             <input
               id="school-name-input"
               type="text"
+              maxLength={120}
               value={schoolName}
               onChange={(e) => setSchoolName(e.target.value)}
               className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
@@ -427,6 +486,127 @@ export function AdminManagementPanel({
             </select>
           </div>
 
+          <div>
+            <label htmlFor="school-location-input" className="block text-xs font-semibold text-[#171717] mb-1.5">
+              Campus Location (optional)
+            </label>
+            <input
+              id="school-location-input"
+              type="text"
+              maxLength={160}
+              value={schoolLocation}
+              onChange={(e) => setSchoolLocation(e.target.value)}
+              placeholder="e.g., Portland, OR"
+              className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="school-status-select" className="block text-xs font-semibold text-[#171717] mb-1.5">
+              School Operational Status
+            </label>
+            <select
+              id="school-status-select"
+              value={schoolStatus}
+              onChange={(e) => {
+                setSchoolStatus(e.target.value as SchoolStatus);
+                setConfirmStatusChange(false);
+              }}
+              className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            >
+              <option value="active">Active (open for approved students)</option>
+              <option value="pending_setup">Pending Setup (admin validation)</option>
+              <option value="suspended">Suspended (maintenance notice)</option>
+            </select>
+          </div>
+
+          <div className="sm:col-span-2">
+            <label htmlFor="school-desc-input" className="block text-xs font-semibold text-[#171717] mb-1.5">
+              School Description (optional)
+            </label>
+            <textarea
+              id="school-desc-input"
+              rows={2}
+              maxLength={600}
+              value={schoolDescription}
+              onChange={(e) => setSchoolDescription(e.target.value)}
+              placeholder="Short welcome message shown in your campus feed header..."
+              className="w-full rounded-xl border border-[#E5E7EB] bg-white p-3 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="school-logo-input" className="block text-xs font-semibold text-[#171717] mb-1.5">
+              Logo URL (HTTPS, optional)
+            </label>
+            <input
+              id="school-logo-input"
+              type="url"
+              maxLength={500}
+              value={schoolLogoUrl}
+              onChange={(e) => setSchoolLogoUrl(e.target.value)}
+              placeholder="https://..."
+              className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="school-cover-input" className="block text-xs font-semibold text-[#171717] mb-1.5">
+              Cover Image URL (HTTPS, optional)
+            </label>
+            <input
+              id="school-cover-input"
+              type="url"
+              maxLength={500}
+              value={schoolCoverUrl}
+              onChange={(e) => setSchoolCoverUrl(e.target.value)}
+              placeholder="https://..."
+              className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="school-contact-name" className="block text-xs font-semibold text-[#171717] mb-1.5">
+              Activities / Admin Contact Name (optional)
+            </label>
+            <input
+              id="school-contact-name"
+              type="text"
+              maxLength={120}
+              value={schoolContactName}
+              onChange={(e) => setSchoolContactName(e.target.value)}
+              placeholder="e.g., Student Activities Office"
+              className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="school-contact-email" className="block text-xs font-semibold text-[#171717] mb-1.5">
+              Contact Email (optional)
+            </label>
+            <input
+              id="school-contact-email"
+              type="email"
+              maxLength={160}
+              value={schoolContactEmail}
+              onChange={(e) => setSchoolContactEmail(e.target.value)}
+              placeholder="activities@school.edu"
+              className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3.5 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+            />
+          </div>
+
+          {confirmStatusChange && (
+            <div
+              role="alert"
+              className="sm:col-span-2 rounded-xl border border-[#E85D04]/40 bg-[#FFF7ED] px-4 py-3 text-xs text-[#525252]"
+            >
+              <strong className="text-[#171717]">Confirm status change:</strong> Click{' '}
+              <strong>Save School Settings</strong> once more to switch status from{' '}
+              <span className="font-mono">{schoolConfig.status}</span> to{' '}
+              <span className="font-mono">{schoolStatus}</span>.
+            </div>
+          )}
+
           <div className="sm:col-span-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
             <label className="inline-flex items-center gap-2 text-xs sm:text-sm text-[#171717] cursor-pointer">
               <input
@@ -443,11 +623,27 @@ export function AdminManagementPanel({
               disabled={savingSchool}
               className="inline-flex min-h-[40px] items-center justify-center rounded-xl bg-[#171717] px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-[#333333] disabled:opacity-60 cursor-pointer"
             >
-              {savingSchool ? 'Saving...' : 'Save School Settings'}
+              {savingSchool
+                ? 'Saving...'
+                : confirmStatusChange
+                  ? 'Confirm & Save School Settings'
+                  : 'Save School Settings'}
             </button>
           </div>
         </form>
       </section>
+
+      {/* 2B. Controlled CSV Import for Real Campus Clubs & Events */}
+      <CsvImportPanel
+        schoolConfig={schoolConfig}
+        currentAdminUid={currentAdminUid}
+        existingClubs={schoolClubs}
+        existingEvents={schoolEvents}
+        onShowToast={onShowToast}
+      />
+
+      {/* 2C. Private Campus Feedback Inbox */}
+      <AdminFeedbackPanel schoolId={schoolConfig.id} onShowToast={onShowToast} />
 
       {/* 3. Controlled Legacy Migration & Demo Seed */}
       <section className="rounded-2xl border border-[#E5E7EB] bg-white p-5 sm:p-6 shadow-xs space-y-4">
@@ -584,6 +780,29 @@ export function AdminManagementPanel({
             </button>
           </div>
         </form>
+      </section>
+
+      {/* 5. Starter Tier Operational Backup Export */}
+      <section className="rounded-2xl border border-[#E5E7EB] bg-white p-5 sm:p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-base font-bold text-[#171717] flex items-center gap-2">
+              <Download className="h-4 w-4 text-[#E85D04]" aria-hidden="true" />
+              <span>Operational Backup Snapshot (JSON)</span>
+            </h2>
+            <p className="mt-0.5 text-xs text-[#737373]">
+              Download a PII-minimized snapshot of school configuration, clubs, and events for Starter Tier disaster recovery. Student attendee lists, follower rosters, emails, and raw UIDs are excluded. Automated scheduled Firestore backups require upgrading to the Blaze plan.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleExportSchoolBackup}
+            className="inline-flex min-h-[40px] shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-4 py-2 text-xs sm:text-sm font-semibold text-[#171717] hover:bg-[#F8F9FA] cursor-pointer"
+          >
+            <Download className="h-4 w-4 text-[#E85D04]" aria-hidden="true" />
+            <span>Export JSON Snapshot</span>
+          </button>
+        </div>
       </section>
     </div>
   );

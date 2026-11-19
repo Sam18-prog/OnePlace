@@ -1,3 +1,5 @@
+import type { EventRegistrationAvailability } from './eventOperations';
+
 export type TimeframeBucket = 'today' | 'this-week' | 'later';
 
 export type EventCategory =
@@ -21,7 +23,8 @@ export type AppView =
   | 'notifications'
   | 'notification-preferences'
   | 'profile'
-  | 'organizer';
+  | 'organizer'
+  | 'about';
 
 export interface DemoEventRaw {
   id: string;
@@ -64,6 +67,21 @@ export interface SchoolEvent {
   cancelledAt?: Date;
   cancellationReason?: string;
   isLegacyRecord?: boolean;
+  // Phase 8 optional event operations & capacity fields (backward-compatible)
+  capacityLimit?: number | null;
+  registrationOpensAt?: Date;
+  registrationClosesAt?: Date;
+  allowWaitlist?: boolean;
+  requireApproval?: boolean;
+  registrationStatus?: EventRegistrationAvailability;
+  confirmedCount?: number;
+  pendingApprovalCount?: number;
+  waitlistCount?: number;
+  checkedInCount?: number;
+  cancelledCount?: number;
+  feedbackCount?: number;
+  feedbackRatingSum?: number;
+  latestAnnouncementAt?: Date;
 }
 
 export interface GroupedEvents {
@@ -84,4 +102,13 @@ export interface EventFormValues {
   description: string;
   imageUrl: string;
   visibility: EventVisibility;
+  // Phase 8 optional registration controls
+  capacityLimit?: string;
+  registrationOpensDate?: string;
+  registrationOpensTime?: string;
+  registrationClosesDate?: string;
+  registrationClosesTime?: string;
+  allowWaitlist?: boolean;
+  requireApproval?: boolean;
+  registrationStatus?: EventRegistrationAvailability;
 }

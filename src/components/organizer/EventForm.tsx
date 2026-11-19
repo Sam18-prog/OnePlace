@@ -15,6 +15,7 @@ import {
   type EventFormErrors,
 } from '../../utils/eventValidation';
 import { EventImage } from '../EventImage';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface EventFormProps {
   isOpen: boolean;
@@ -35,8 +36,15 @@ function getInitialValues(
   authorizedClubs: Club[]
 ): EventFormValues {
   if (event) {
-    const startParts = formatDateInTimezone(event.startAt, event.timezone || schoolTimezone);
-    const endParts = formatDateInTimezone(event.endAt, event.timezone || schoolTimezone);
+    const tz = event.timezone || schoolTimezone;
+    const startParts = formatDateInTimezone(event.startAt, tz);
+    const endParts = formatDateInTimezone(event.endAt, tz);
+    const opensParts = event.registrationOpensAt
+      ? formatDateInTimezone(event.registrationOpensAt, tz)
+      : null;
+    const closesParts = event.registrationClosesAt
+      ? formatDateInTimezone(event.registrationClosesAt, tz)
+      : null;
     return {
       title: event.title,
       hostClub: event.hostClub,
@@ -49,6 +57,17 @@ function getInitialValues(
       description: event.description,
       imageUrl: event.imageUrl ?? '',
       visibility: event.visibility,
+      capacityLimit:
+        typeof event.capacityLimit === 'number' && event.capacityLimit > 0
+          ? String(event.capacityLimit)
+          : '',
+      registrationOpensDate: opensParts?.date ?? '',
+      registrationOpensTime: opensParts?.time ?? '',
+      registrationClosesDate: closesParts?.date ?? '',
+      registrationClosesTime: closesParts?.time ?? '',
+      allowWaitlist: Boolean(event.allowWaitlist),
+      requireApproval: Boolean(event.requireApproval),
+      registrationStatus: event.registrationStatus ?? 'open',
     };
   }
 
@@ -67,6 +86,14 @@ function getInitialValues(
     description: '',
     imageUrl: '',
     visibility: 'public',
+    capacityLimit: '',
+    registrationOpensDate: '',
+    registrationOpensTime: '',
+    registrationClosesDate: '',
+    registrationClosesTime: '',
+    allowWaitlist: true,
+    requireApproval: false,
+    registrationStatus: 'open',
   };
 }
 
@@ -87,8 +114,8 @@ export function EventForm({
   );
   const [errors, setErrors] = useState<EventFormErrors>({});
 
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -96,28 +123,13 @@ export function EventForm({
     setErrors({});
   }, [isOpen, initialEvent, schoolTimezone, authorizedClubs]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    previousFocusRef.current = document.activeElement as HTMLElement | null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const focusTimer = window.setTimeout(() => {
-      titleInputRef.current?.focus();
-    }, 30);
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSubmitting) onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previousFocusRef.current?.focus?.();
-    };
-  }, [isOpen, isSubmitting, onClose]);
+  useFocusTrap({
+    isOpen,
+    containerRef: dialogRef,
+    initialFocusRef: titleInputRef,
+    onClose,
+    disableEscape: isSubmitting,
+  });
 
   if (!isOpen) return null;
 
@@ -178,6 +190,7 @@ export function EventForm({
     const validation = validateEventForm(values, targetStatus, schoolTimezone, {
       isEditingExistingPublished,
       requireClubId: true,
+      minConfirmedCount: initialEvent?.rsvpCount,
     });
     if (!validation.valid) {
       setErrors(validation.errors);
@@ -200,10 +213,12 @@ export function EventForm({
       }}
     >
       <motion.div
+        ref={dialogRef}
+        tabIndex={-1}
         initial={{ opacity: 0, y: 18, scale: 0.99 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        className="flex flex-col w-full md:max-w-2xl max-h-[92dvh] md:max-h-[88vh] overflow-hidden rounded-t-2xl md:rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl"
+        className="flex flex-col w-full md:max-w-2xl max-h-[92dvh] md:max-h-[88vh] overflow-hidden rounded-t-2xl md:rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-4 bg-white shrink-0">
@@ -494,6 +509,163 @@ export function EventForm({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Registration & Capacity Operations (Phase 8) */}
+          <div className="rounded-xl border border-[#E5E7EB] bg-[#F8F9FA] p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold text-[#171717]">
+                  Registration &amp; Capacity Settings
+                </p>
+                <p className="text-[11px] text-[#737373]">
+                  Enforced atomically in Firestore Rules so events never overbook.
+                </p>
+              </div>
+              {initialEvent && initialEvent.rsvpCount > 0 && (
+                <span className="font-mono tabular-nums text-[11px] font-medium text-[#525252]">
+                  {initialEvent.rsvpCount} confirmed
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="evt-capacity"
+                  className="block text-[11px] font-semibold text-[#171717] mb-1"
+                >
+                  Capacity limit <span className="font-normal text-[#737373]">(blank = unlimited)</span>
+                </label>
+                <input
+                  id="evt-capacity"
+                  type="number"
+                  min={Math.max(1, initialEvent?.rsvpCount ?? 1)}
+                  max={100000}
+                  step={1}
+                  value={values.capacityLimit ?? ''}
+                  onChange={(e) => updateField('capacityLimit', e.target.value)}
+                  placeholder="e.g., 40"
+                  className="h-9 w-full rounded-lg border border-[#E5E7EB] bg-white px-3 font-mono tabular-nums text-sm text-[#171717] placeholder:text-[#737373] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+                />
+                {errors.capacityLimit && (
+                  <p className="mt-1 text-xs text-[#DC2626]">{errors.capacityLimit}</p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="evt-reg-status"
+                  className="block text-[11px] font-semibold text-[#171717] mb-1"
+                >
+                  Registration status
+                </label>
+                <select
+                  id="evt-reg-status"
+                  value={values.registrationStatus ?? 'open'}
+                  onChange={(e) =>
+                    updateField(
+                      'registrationStatus',
+                      e.target.value as EventFormValues['registrationStatus']
+                    )
+                  }
+                  className="h-9 w-full rounded-lg border border-[#E5E7EB] bg-white px-3 text-sm text-[#171717] focus:border-[#E85D04] focus:outline-none focus:ring-2 focus:ring-[#E85D04]/15"
+                >
+                  <option value="open">Open for registration</option>
+                  <option value="closed">Closed (no new sign-ups)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="evt-reg-opens-date"
+                  className="block text-[11px] font-medium text-[#737373] mb-1"
+                >
+                  Registration opens <span className="text-[#A3A3A3]">(optional)</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    id="evt-reg-opens-date"
+                    type="date"
+                    value={values.registrationOpensDate ?? ''}
+                    onChange={(e) => updateField('registrationOpensDate', e.target.value)}
+                    className="h-9 w-full rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-xs text-[#171717] focus:border-[#E85D04] focus:outline-none"
+                  />
+                  <input
+                    aria-label="Registration opens time"
+                    type="time"
+                    value={values.registrationOpensTime ?? ''}
+                    onChange={(e) => updateField('registrationOpensTime', e.target.value)}
+                    className="h-9 w-full rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-xs text-[#171717] focus:border-[#E85D04] focus:outline-none"
+                  />
+                </div>
+                {errors.registrationOpensDate && (
+                  <p className="mt-1 text-xs text-[#DC2626]">{errors.registrationOpensDate}</p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="evt-reg-closes-date"
+                  className="block text-[11px] font-medium text-[#737373] mb-1"
+                >
+                  Registration closes <span className="text-[#A3A3A3]">(optional)</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    id="evt-reg-closes-date"
+                    type="date"
+                    value={values.registrationClosesDate ?? ''}
+                    onChange={(e) => updateField('registrationClosesDate', e.target.value)}
+                    className="h-9 w-full rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-xs text-[#171717] focus:border-[#E85D04] focus:outline-none"
+                  />
+                  <input
+                    aria-label="Registration closes time"
+                    type="time"
+                    value={values.registrationClosesTime ?? ''}
+                    onChange={(e) => updateField('registrationClosesTime', e.target.value)}
+                    className="h-9 w-full rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-xs text-[#171717] focus:border-[#E85D04] focus:outline-none"
+                  />
+                </div>
+                {errors.registrationClosesDate && (
+                  <p className="mt-1 text-xs text-[#DC2626]">{errors.registrationClosesDate}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <label className="flex items-start gap-2.5 rounded-lg border border-[#E5E7EB] bg-white p-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(values.allowWaitlist)}
+                  onChange={(e) => updateField('allowWaitlist', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-[#D1D5DB] accent-[#E85D04]"
+                />
+                <span className="text-xs leading-snug">
+                  <span className="font-semibold text-[#171717] block">Allow waitlist when full</span>
+                  <span className="text-[11px] text-[#737373]">
+                    Students join a FIFO queue for organizer promotion.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2.5 rounded-lg border border-[#E5E7EB] bg-white p-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(values.requireApproval)}
+                  onChange={(e) => updateField('requireApproval', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-[#D1D5DB] accent-[#E85D04]"
+                />
+                <span className="text-xs leading-snug">
+                  <span className="font-semibold text-[#171717] block">Require organizer approval</span>
+                  <span className="text-[11px] text-[#737373]">
+                    Hold new requests as pending until approved.
+                  </span>
+                </span>
+              </label>
             </div>
           </div>
 

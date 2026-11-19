@@ -1,7 +1,20 @@
 import { motion } from 'motion/react';
-import { CalendarPlus, Check, Clock, Lock, MapPin, Users, XCircle } from 'lucide-react';
+import {
+  CalendarPlus,
+  Check,
+  CheckCircle2,
+  Clock,
+  Hourglass,
+  ListPlus,
+  Lock,
+  MapPin,
+  Users,
+  XCircle,
+} from 'lucide-react';
 import type { SchoolEvent } from '../types/event';
+import type { StudentEventLifecycleState } from '../types/eventOperations';
 import { buildGoogleCalendarUrl, formatEventDateTime, getDateTileParts } from '../utils/events';
+import { getEventCapacitySnapshot } from '../utils/eventRegistration';
 import { isPastEvent } from '../utils/eventValidation';
 import { CategoryBadge } from './CategoryBadge';
 import { EventImage } from './EventImage';
@@ -13,6 +26,8 @@ interface EventCardProps {
   rsvpCount: number;
   isGoing: boolean;
   isSignedIn: boolean;
+  lifecycle?: StudentEventLifecycleState;
+  isBusy?: boolean;
   onRsvpClick: (event: SchoolEvent) => void;
   onSelectEvent: (event: SchoolEvent) => void;
   onSelectClubById?: (clubId: string) => void;
@@ -25,6 +40,8 @@ export function EventCard({
   rsvpCount,
   isGoing,
   isSignedIn,
+  lifecycle,
+  isBusy = false,
   onRsvpClick,
   onSelectEvent,
   onSelectClubById,
@@ -37,8 +54,147 @@ export function EventCard({
   const isCancelled = event.status === 'cancelled';
   const isDraft = event.status === 'draft';
   const isPast = isPastEvent(event);
-  const canRsvpNow = !isCancelled && !isDraft && (!isPast || isGoing);
-  const rsvpBlocked = (!canRsvpNow && !isGoing) || isDraft;
+
+  const capacity = getEventCapacitySnapshot({
+    ...event,
+    rsvpCount,
+    confirmedCount: rsvpCount,
+  });
+
+  const status = lifecycle ? lifecycle.status : isGoing ? 'confirmed' : 'not_registered';
+  const isAttended = status === 'attended';
+  const isConfirmed = status === 'confirmed';
+  const isPending = status === 'pending_approval';
+  const isWaitlisted = status === 'waitlisted';
+  const hasActiveRegistration = isConfirmed || isPending || isWaitlisted || isAttended;
+
+  const isRegistrationClosed =
+    !isCancelled &&
+    !isDraft &&
+    !isPast &&
+    capacity.effectiveRegistrationStatus === 'closed';
+
+  const isFullWithoutWaitlist =
+    !hasActiveRegistration && capacity.isFull && !event.allowWaitlist;
+  const isWaitlistEligible =
+    !hasActiveRegistration &&
+    !isCancelled &&
+    !isDraft &&
+    !isPast &&
+    !isRegistrationClosed &&
+    capacity.isFull &&
+    Boolean(event.allowWaitlist);
+
+  const canAct =
+    !isBusy &&
+    !isDraft &&
+    !isAttended &&
+    (hasActiveRegistration
+      ? !isPast || isCancelled
+      : !isCancelled && !isPast && !isRegistrationClosed && !isFullWithoutWaitlist);
+
+  const buttonBlocked = !canAct;
+
+  // Determine clean CTA label & visual treatment
+  let ctaLabel = 'Register';
+  let ctaTone = 'bg-[#E85D04] text-white hover:bg-[#DC2F02] cursor-pointer';
+  let ctaIcon: 'check' | 'attended' | 'pending' | 'waitlist' | null = null;
+
+  if (isBusy) {
+    ctaLabel = 'Saving...';
+    ctaTone = 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#525252] cursor-wait';
+  } else if (isAttended) {
+    ctaLabel = 'Checked In';
+    ctaTone = 'border border-[#16A34A]/30 bg-[#16A34A]/10 text-[#15803D] cursor-default';
+    ctaIcon = 'attended';
+  } else if (isConfirmed) {
+    if (isCancelled) {
+      ctaLabel = 'Cancel Registration';
+      ctaTone = 'border border-red-200 bg-red-50 text-[#DC2626] hover:bg-red-100 cursor-pointer';
+    } else if (isPast) {
+      ctaLabel = 'Registered';
+      ctaTone = 'border border-[#16A34A]/30 bg-[#16A34A]/10 text-[#15803D] cursor-default';
+      ctaIcon = 'check';
+    } else {
+      ctaLabel = 'Registered';
+      ctaTone = 'bg-[#16A34A] text-white hover:bg-[#15803D] cursor-pointer';
+      ctaIcon = 'check';
+    }
+  } else if (isPending) {
+    ctaLabel = isCancelled ? 'Cancel Request' : 'Pending Approval';
+    ctaTone = isCancelled
+      ? 'border border-red-200 bg-red-50 text-[#DC2626] hover:bg-red-100 cursor-pointer'
+      : 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer';
+    ctaIcon = isCancelled ? null : 'pending';
+  } else if (isWaitlisted) {
+    ctaLabel = isCancelled ? 'Leave Waitlist' : 'Waitlisted';
+    ctaTone = isCancelled
+      ? 'border border-red-200 bg-red-50 text-[#DC2626] hover:bg-red-100 cursor-pointer'
+      : 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer';
+    ctaIcon = isCancelled ? null : 'waitlist';
+  } else if (isCancelled) {
+    ctaLabel = 'Cancelled';
+    ctaTone = 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed';
+  } else if (isDraft) {
+    ctaLabel = 'Draft';
+    ctaTone = 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed';
+  } else if (isPast) {
+    ctaLabel = 'Event ended';
+    ctaTone = 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed';
+  } else if (isRegistrationClosed) {
+    ctaLabel = 'Closed';
+    ctaTone = 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed';
+  } else if (isFullWithoutWaitlist) {
+    ctaLabel = 'Event Full';
+    ctaTone = 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed';
+  } else if (isWaitlistEligible) {
+    ctaLabel = 'Join Waitlist';
+    ctaTone = 'bg-[#171717] text-white hover:bg-[#333333] cursor-pointer';
+    ctaIcon = 'waitlist';
+  } else if (event.requireApproval) {
+    ctaLabel = 'Request Spot';
+    ctaTone = 'bg-[#E85D04] text-white hover:bg-[#DC2F02] cursor-pointer';
+  } else {
+    ctaLabel = 'Register';
+    ctaTone = 'bg-[#E85D04] text-white hover:bg-[#DC2F02] cursor-pointer';
+  }
+
+  // Capacity & availability metadata text (unboxed, clean, tabular)
+  const capacitySummary = (() => {
+    if (capacity.capacityLimit !== null) {
+      if (capacity.isFull) {
+        return event.allowWaitlist
+          ? `${capacity.confirmedCount}/${capacity.capacityLimit} · Full · Waitlist open`
+          : `${capacity.confirmedCount}/${capacity.capacityLimit} · Full`;
+      }
+      return `${capacity.confirmedCount}/${capacity.capacityLimit} · ${capacity.remainingSpots} left`;
+    }
+    return `${capacity.confirmedCount} going`;
+  })();
+
+  const ariaActionLabel = isAttended
+    ? `Checked in to ${event.title}`
+    : isConfirmed
+      ? `Cancel registration for ${event.title}`
+      : isPending
+        ? `Cancel pending registration for ${event.title}`
+        : isWaitlisted
+          ? `Leave waitlist for ${event.title}`
+          : isCancelled
+            ? `${event.title} is cancelled`
+            : isPast
+              ? `${event.title} has already ended`
+              : isRegistrationClosed
+                ? `Registration is closed for ${event.title}`
+                : isFullWithoutWaitlist
+                  ? `${event.title} is full`
+                  : isWaitlistEligible
+                    ? isSignedIn
+                      ? `Join waitlist for ${event.title}`
+                      : `Sign in to join waitlist for ${event.title}`
+                    : isSignedIn
+                      ? `Register for ${event.title}`
+                      : `Sign in to register for ${event.title}`;
 
   return (
     <motion.div
@@ -197,52 +353,29 @@ export function EventCard({
             <div className="flex items-center gap-2">
               <motion.button
                 type="button"
-                disabled={rsvpBlocked}
+                disabled={buttonBlocked}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!rsvpBlocked) onRsvpClick(event);
+                  if (!buttonBlocked) onRsvpClick(event);
                 }}
-                aria-pressed={isGoing}
-                aria-label={
-                  isGoing
-                    ? `Cancel RSVP for ${event.title}`
-                    : isCancelled
-                      ? `${event.title} is cancelled`
-                      : isPast
-                        ? `${event.title} has already ended`
-                        : isSignedIn
-                          ? `RSVP to ${event.title}`
-                          : `Sign in to RSVP to ${event.title}`
-                }
-                animate={isGoing ? { scale: [1, 1.05, 1] } : { scale: 1 }}
-                whileTap={rsvpBlocked ? undefined : { scale: 0.97 }}
+                aria-pressed={hasActiveRegistration}
+                aria-label={ariaActionLabel}
+                animate={isConfirmed || isAttended ? { scale: [1, 1.04, 1] } : { scale: 1 }}
+                whileTap={buttonBlocked ? undefined : { scale: 0.97 }}
                 transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                className={`inline-flex min-h-[42px] min-w-[120px] items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04] ${
-                  rsvpBlocked
-                    ? 'border border-[#E5E7EB] bg-[#F3F4F6] text-[#737373] cursor-not-allowed'
-                    : isGoing && isCancelled
-                      ? 'border border-red-200 bg-red-50 text-[#DC2626] hover:bg-red-100 cursor-pointer'
-                      : isGoing
-                        ? 'bg-[#16A34A] text-white hover:bg-[#15803D] cursor-pointer'
-                        : 'bg-[#E85D04] text-white hover:bg-[#DC2F02] cursor-pointer'
-                }`}
+                className={`inline-flex min-h-[42px] min-w-[124px] items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E85D04] ${ctaTone}`}
               >
-                {isGoing ? (
-                  isCancelled ? (
-                    <span>Cancel RSVP</span>
-                  ) : (
-                    <>
-                      <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
-                      <span>You're going!</span>
-                    </>
-                  )
-                ) : isCancelled ? (
-                  <span>Cancelled</span>
-                ) : isPast ? (
-                  <span>Event ended</span>
-                ) : (
-                  <span>RSVP</span>
+                {ctaIcon === 'attended' && (
+                  <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                 )}
+                {ctaIcon === 'check' && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
+                {ctaIcon === 'pending' && (
+                  <Hourglass className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                )}
+                {ctaIcon === 'waitlist' && (
+                  <ListPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+                )}
+                <span>{ctaLabel}</span>
               </motion.button>
 
               {!isCancelled && (
@@ -262,10 +395,17 @@ export function EventCard({
 
             <div
               aria-live="polite"
-              className="inline-flex items-center gap-1.5 font-mono tabular-nums text-xs font-medium text-[#737373]"
+              className={`inline-flex items-center gap-1.5 font-mono tabular-nums text-xs font-medium ${
+                capacity.isFull && !isCancelled
+                  ? 'text-[#B45309]'
+                  : 'text-[#737373]'
+              }`}
             >
-              <Users className="h-3.5 w-3.5 text-[#737373]" aria-hidden="true" />
-              <span>{rsvpCount} going</span>
+              <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>{capacitySummary}</span>
+              {capacity.waitlistCount > 0 && (
+                <span className="text-[#737373]">· {capacity.waitlistCount} waitlisted</span>
+              )}
             </div>
           </div>
         </div>
@@ -273,3 +413,4 @@ export function EventCard({
     </motion.div>
   );
 }
+

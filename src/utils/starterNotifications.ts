@@ -1,5 +1,6 @@
 import type { Club, UserFollowedClub } from '../types/club';
 import type { SchoolEvent } from '../types/event';
+import type { EventAnnouncementRecord } from '../types/eventOperations';
 import type { AppNotification, NotificationPreferences } from '../types/notification';
 import { buildSafeDedupId, formatTimeInZone } from './notificationValidation';
 
@@ -18,6 +19,7 @@ export interface StarterNotificationInputs {
   schoolId: string;
   preferences: NotificationPreferences;
   announcements: SchoolAnnouncementRecord[];
+  eventAnnouncementsByEventId?: Record<string, EventAnnouncementRecord[]>;
   clubs: Club[];
   events: SchoolEvent[];
   followedById: Record<string, UserFollowedClub>;
@@ -36,6 +38,7 @@ export function deriveStarterTierNotifications(
     schoolId,
     preferences,
     announcements,
+    eventAnnouncementsByEventId = {},
     clubs,
     events,
     followedById,
@@ -48,6 +51,32 @@ export function deriveStarterTierNotifications(
   }
 
   const items: AppNotification[] = [];
+
+  // 0. Phase 8 Event-specific organizer announcements for events the student is registered for
+  if (preferences.clubEventUpdates) {
+    const eventById = new Map(events.map((e) => [e.id, e]));
+    for (const [eventId, list] of Object.entries(eventAnnouncementsByEventId)) {
+      const evt = eventById.get(eventId);
+      if (!evt || !isEventGoing(evt)) continue;
+      for (const ann of list) {
+        if (ann.status !== 'active') continue;
+        items.push({
+          id: buildSafeDedupId(`starter_evt_ann_${eventId}_${ann.id}`),
+          recipientUid: uid,
+          schoolId,
+          type: 'event_update',
+          title: `${evt.title}: ${ann.title}`,
+          message: ann.message,
+          createdAt: ann.createdAt,
+          entityType: 'event',
+          entityId: eventId,
+          actionUrl: `/?view=event&id=${eventId}`,
+          status: 'unread',
+          dedupKey: buildSafeDedupId(`evt_ann_${eventId}_${ann.id}_${uid}`),
+        });
+      }
+    }
+  }
 
   // 1. School-wide announcements stored in Firestore
   for (const ann of announcements) {

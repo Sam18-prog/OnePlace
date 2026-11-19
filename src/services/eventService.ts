@@ -23,6 +23,7 @@ import type {
   EventVisibility,
   SchoolEvent,
 } from '../types/event';
+import type { EventRegistrationAvailability } from '../types/eventOperations';
 import type { MemberRole } from '../types/membership';
 import { computeClubDiscoverKey, mapEventCategoryToClubCategory, slugifyClubName } from '../utils/clubValidation';
 import { isSafeMediaUrl } from '../utils/eventMedia';
@@ -137,6 +138,63 @@ export function mapFirestoreEventDoc(id: string, data: DocumentData): SchoolEven
     cancellationReason:
       typeof data.cancellationReason === 'string' ? data.cancellationReason : undefined,
     isLegacyRecord,
+    // Phase 8 optional event operations fields
+    capacityLimit:
+      typeof data.capacityLimit === 'number' &&
+      Number.isInteger(data.capacityLimit) &&
+      data.capacityLimit >= 1
+        ? data.capacityLimit
+        : null,
+    registrationOpensAt: data.registrationOpensAt
+      ? parseFirestoreDate(data.registrationOpensAt)
+      : undefined,
+    registrationClosesAt: data.registrationClosesAt
+      ? parseFirestoreDate(data.registrationClosesAt)
+      : undefined,
+    allowWaitlist: typeof data.allowWaitlist === 'boolean' ? data.allowWaitlist : undefined,
+    requireApproval: typeof data.requireApproval === 'boolean' ? data.requireApproval : undefined,
+    registrationStatus:
+      data.registrationStatus === 'open' ||
+      data.registrationStatus === 'closed' ||
+      data.registrationStatus === 'full' ||
+      data.registrationStatus === 'cancelled'
+        ? (data.registrationStatus as EventRegistrationAvailability)
+        : undefined,
+    confirmedCount:
+      typeof data.confirmedCount === 'number' && Number.isFinite(data.confirmedCount) && data.confirmedCount >= 0
+        ? Math.floor(data.confirmedCount)
+        : undefined,
+    pendingApprovalCount:
+      typeof data.pendingApprovalCount === 'number' &&
+      Number.isFinite(data.pendingApprovalCount) &&
+      data.pendingApprovalCount >= 0
+        ? Math.floor(data.pendingApprovalCount)
+        : undefined,
+    waitlistCount:
+      typeof data.waitlistCount === 'number' && Number.isFinite(data.waitlistCount) && data.waitlistCount >= 0
+        ? Math.floor(data.waitlistCount)
+        : undefined,
+    checkedInCount:
+      typeof data.checkedInCount === 'number' && Number.isFinite(data.checkedInCount) && data.checkedInCount >= 0
+        ? Math.floor(data.checkedInCount)
+        : undefined,
+    cancelledCount:
+      typeof data.cancelledCount === 'number' && Number.isFinite(data.cancelledCount) && data.cancelledCount >= 0
+        ? Math.floor(data.cancelledCount)
+        : undefined,
+    feedbackCount:
+      typeof data.feedbackCount === 'number' && Number.isFinite(data.feedbackCount) && data.feedbackCount >= 0
+        ? Math.floor(data.feedbackCount)
+        : undefined,
+    feedbackRatingSum:
+      typeof data.feedbackRatingSum === 'number' &&
+      Number.isFinite(data.feedbackRatingSum) &&
+      data.feedbackRatingSum >= 0
+        ? Math.floor(data.feedbackRatingSum)
+        : undefined,
+    latestAnnouncementAt: data.latestAnnouncementAt
+      ? parseFirestoreDate(data.latestAnnouncementAt)
+      : undefined,
   };
 }
 
@@ -303,7 +361,7 @@ export async function createManagedEvent(params: {
   const cleanImage = values.imageUrl.trim();
   const resolvedClubId = (values.clubId || slugifyClubId(values.hostClub)).trim();
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     id: eventId,
     schoolId,
     title: values.title.trim().slice(0, EVENT_TITLE_MAX),
@@ -322,6 +380,21 @@ export async function createManagedEvent(params: {
     status,
     visibility: values.visibility,
     rsvpCount: 0,
+    confirmedCount: 0,
+    pendingApprovalCount: 0,
+    waitlistCount: 0,
+    checkedInCount: 0,
+    cancelledCount: 0,
+    capacityLimit: validation.capacityLimit,
+    allowWaitlist: Boolean(values.allowWaitlist),
+    requireApproval: Boolean(values.requireApproval),
+    registrationStatus: values.registrationStatus ?? 'open',
+    ...(validation.registrationOpensAt
+      ? { registrationOpensAt: Timestamp.fromDate(validation.registrationOpensAt) }
+      : {}),
+    ...(validation.registrationClosesAt
+      ? { registrationClosesAt: Timestamp.fromDate(validation.registrationClosesAt) }
+      : {}),
     discoverKey: computeDiscoverKey(schoolId, status, values.visibility, creatorUid),
   };
 
@@ -345,6 +418,7 @@ export async function updateManagedEvent(params: {
   const { existing, values, targetStatus, timezone } = params;
   const validation = validateEventForm(values, targetStatus, timezone, {
     isEditingExistingPublished: existing.status === 'published' && targetStatus === 'published',
+    minConfirmedCount: existing.rsvpCount,
   });
 
   if (!validation.valid || !validation.startAt || !validation.endAt) {
@@ -369,6 +443,17 @@ export async function updateManagedEvent(params: {
     updatedAt: serverTimestamp(),
     status: targetStatus,
     visibility: values.visibility,
+    capacityLimit: validation.capacityLimit,
+    allowWaitlist: Boolean(values.allowWaitlist),
+    requireApproval: Boolean(values.requireApproval),
+    registrationStatus:
+      targetStatus === 'cancelled' ? 'cancelled' : values.registrationStatus ?? 'open',
+    registrationOpensAt: validation.registrationOpensAt
+      ? Timestamp.fromDate(validation.registrationOpensAt)
+      : null,
+    registrationClosesAt: validation.registrationClosesAt
+      ? Timestamp.fromDate(validation.registrationClosesAt)
+      : null,
     discoverKey: computeDiscoverKey(
       existing.schoolId,
       targetStatus,
@@ -386,6 +471,41 @@ export async function updateManagedEvent(params: {
     if (targetStatus === 'published') {
       void touchClubActivity(existing.schoolId, resolvedClubId);
     }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateEventRegistrationControls(params: {
+  event: SchoolEvent;
+  capacityLimit?: number | null;
+  allowWaitlist?: boolean;
+  requireApproval?: boolean;
+  registrationStatus?: EventRegistrationAvailability;
+}): Promise<void> {
+  const { event, capacityLimit, allowWaitlist, requireApproval, registrationStatus } = params;
+  const path = `events/${event.id}`;
+
+  if (
+    capacityLimit !== undefined &&
+    capacityLimit !== null &&
+    (!Number.isInteger(capacityLimit) || capacityLimit < event.rsvpCount || capacityLimit > 100_000)
+  ) {
+    throw new Error(
+      `Capacity must be at least ${Math.max(1, event.rsvpCount)} (current confirmed count).`
+    );
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+  if (capacityLimit !== undefined) patch.capacityLimit = capacityLimit;
+  if (allowWaitlist !== undefined) patch.allowWaitlist = allowWaitlist;
+  if (requireApproval !== undefined) patch.requireApproval = requireApproval;
+  if (registrationStatus !== undefined) patch.registrationStatus = registrationStatus;
+
+  try {
+    await updateDoc(doc(db, 'events', event.id), patch);
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }

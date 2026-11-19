@@ -1,3 +1,5 @@
+import type { PilotStage, SchoolOnboardingChecklist, SchoolStatus } from '../types/school';
+
 const rawSchoolId =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SCHOOL_ID) || 'oakridge-high';
 const rawSchoolName =
@@ -24,6 +26,18 @@ export const SUPPORTED_TIMEZONES = [
 export interface SchoolConfig {
   id: string;
   name: string;
+  slug?: string;
+  logoUrl?: string;
+  coverImageUrl?: string;
+  description?: string;
+  location?: string;
   timezone: string;
+  contactEmail?: string;
+  contactName?: string;
+  status: SchoolStatus;
   allowPublicDiscovery: boolean;
+  pilotStage?: PilotStage;
+  onboardingChecklist?: SchoolOnboardingChecklist;
+  createdAt?: Date;
+  updatedAt?: Date;
 }

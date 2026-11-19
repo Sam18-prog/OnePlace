@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
-  DEFAULT_SCHOOL_ID,
   DEFAULT_SCHOOL_NAME,
   DEFAULT_SCHOOL_TIMEZONE,
   type SchoolConfig,
 } from '../config/school';
 import { fetchSchoolConfig, fetchUserMembership } from '../services/membershipService';
 import type { MembershipCapabilities, SchoolMembership } from '../types/membership';
+import { logClientDiagnostic } from '../utils/errorHandling';
 import { getMembershipCapabilities } from '../utils/eventValidation';
+import { getRuntimeSchoolId } from '../utils/schoolContext';
 
 export function useMembership(user: User | null, authLoading: boolean) {
+  const activeSchoolId = useMemo(() => getRuntimeSchoolId(), []);
+
   const [schoolConfig, setSchoolConfig] = useState<SchoolConfig>({
-    id: DEFAULT_SCHOOL_ID,
+    id: activeSchoolId,
     name: DEFAULT_SCHOOL_NAME,
     timezone: DEFAULT_SCHOOL_TIMEZONE,
+    status: 'active',
     allowPublicDiscovery: true,
   });
   const [membership, setMembership] = useState<SchoolMembership | null>(null);
@@ -23,7 +27,7 @@ export function useMembership(user: User | null, authLoading: boolean) {
   const loadSchoolAndMembership = useCallback(async () => {
     setMembershipLoading(true);
     try {
-      const config = await fetchSchoolConfig(DEFAULT_SCHOOL_ID);
+      const config = await fetchSchoolConfig(activeSchoolId);
       setSchoolConfig(config);
 
       if (!user) {
@@ -34,12 +38,12 @@ export function useMembership(user: User | null, authLoading: boolean) {
       const resolved = await fetchUserMembership(config.id, user);
       setMembership(resolved);
     } catch (err) {
-      console.warn('Membership check failed:', err);
+      logClientDiagnostic('useMembership.loadSchoolAndMembership', err);
       setMembership(null);
     } finally {
       setMembershipLoading(false);
     }
-  }, [user]);
+  }, [activeSchoolId, user]);
 
   useEffect(() => {
     if (authLoading) return;

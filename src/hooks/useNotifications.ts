@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import type { Club, UserFollowedClub } from '../types/club';
 import type { EventCategory, SchoolEvent } from '../types/event';
+import type { EventAnnouncementRecord } from '../types/eventOperations';
 import type {
   AppNotification,
   NotificationPreferences,
@@ -35,6 +36,7 @@ import {
   mergeInAppNotifications,
   type SchoolAnnouncementRecord,
 } from '../utils/starterNotifications';
+import { logClientDiagnostic, toUserFriendlyErrorMessage } from '../utils/errorHandling';
 
 export interface StarterFeedContext {
   isSchoolMember: boolean;
@@ -42,6 +44,7 @@ export interface StarterFeedContext {
   clubs: Club[];
   followedById: Record<string, UserFollowedClub>;
   isEventGoing: (event: SchoolEvent) => boolean;
+  eventAnnouncementsByEventId?: Record<string, EventAnnouncementRecord[]>;
 }
 
 function loadReadLocalIds(uid: string): Set<string> {
@@ -132,7 +135,10 @@ export function useNotifications(params: {
       },
       onError: (err) => {
         if (!active) return;
-        setNotificationsError(err.message || 'Could not load notifications.');
+        logClientDiagnostic('Notifications listener error', err);
+        setNotificationsError(
+          toUserFriendlyErrorMessage(err, 'Could not load notifications right now.')
+        );
         setNotificationsLoading(false);
       },
     });
@@ -231,6 +237,7 @@ export function useNotifications(params: {
       schoolId,
       preferences,
       announcements: schoolAnnouncements,
+      eventAnnouncementsByEventId: starterFeedContext?.eventAnnouncementsByEventId ?? {},
       clubs: starterFeedContext?.clubs ?? [],
       events: starterFeedContext?.events ?? [],
       followedById: starterFeedContext?.followedById ?? {},
@@ -241,6 +248,7 @@ export function useNotifications(params: {
     schoolAnnouncements,
     schoolId,
     starterFeedContext?.clubs,
+    starterFeedContext?.eventAnnouncementsByEventId,
     starterFeedContext?.events,
     starterFeedContext?.followedById,
     starterFeedContext?.isEventGoing,
@@ -337,9 +345,10 @@ export function useNotifications(params: {
         onShowToast('success', 'Notification preferences saved.');
         return true;
       } catch (err) {
+        logClientDiagnostic('Save notification preferences error', err);
         onShowToast(
           'error',
-          err instanceof Error ? err.message : 'Could not save notification preferences.'
+          toUserFriendlyErrorMessage(err, 'Could not save notification preferences.')
         );
         return false;
       } finally {
@@ -381,9 +390,10 @@ export function useNotifications(params: {
       try {
         await saveNotificationPreferences(user.uid, schoolId, nextPrefs);
       } catch (err) {
+        logClientDiagnostic('Toggle interest category error', err);
         onShowToast(
           'error',
-          err instanceof Error ? err.message : 'Could not update campus interests.'
+          toUserFriendlyErrorMessage(err, 'Could not update campus interests.')
         );
       }
     },

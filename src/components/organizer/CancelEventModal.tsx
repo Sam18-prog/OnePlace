@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { AlertTriangle, X } from 'lucide-react';
 import type { SchoolEvent } from '../../types/event';
 import { CANCELLATION_REASON_MAX } from '../../utils/eventValidation';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface CancelEventModalProps {
   event: SchoolEvent | null;
@@ -18,32 +19,21 @@ export function CancelEventModal({
   onClose,
 }: CancelEventModalProps) {
   const [reason, setReason] = useState('');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!event) return;
     setReason('');
-    previousFocusRef.current = document.activeElement as HTMLElement | null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+  }, [event]);
 
-    const focusTimer = window.setTimeout(() => {
-      textareaRef.current?.focus();
-    }, 20);
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSubmitting) onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = prevOverflow;
-      previousFocusRef.current?.focus?.();
-    };
-  }, [event, isSubmitting, onClose]);
+  useFocusTrap({
+    isOpen: Boolean(event),
+    containerRef: dialogRef,
+    initialFocusRef: textareaRef,
+    onClose,
+    disableEscape: isSubmitting,
+  });
 
   if (!event) return null;
 
@@ -58,10 +48,12 @@ export function CancelEventModal({
       }}
     >
       <motion.div
+        ref={dialogRef}
+        tabIndex={-1}
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-md rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-2xl"
+        className="w-full max-w-md rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">

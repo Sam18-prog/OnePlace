@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   BadgeCheck,
@@ -44,6 +44,8 @@ import {
   validateClubOrganizerEditForm,
   type ClubFormErrors,
 } from '../../utils/clubValidation';
+import { toUserFriendlyErrorMessage } from '../../utils/errorHandling';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface ClubManagementViewProps {
   schoolConfig: SchoolConfig;
@@ -102,6 +104,22 @@ export function ClubManagementView({
   const [savingOrg, setSavingOrg] = useState(false);
 
   const [busyClubId, setBusyClubId] = useState<string | null>(null);
+  const editorModalRef = useRef<HTMLDivElement | null>(null);
+  const rosterModalRef = useRef<HTMLDivElement | null>(null);
+
+  useFocusTrap({
+    isOpen: Boolean(editorMode),
+    containerRef: editorModalRef,
+    onClose: () => setEditorMode(null),
+    disableEscape: isSubmitting,
+  });
+
+  useFocusTrap({
+    isOpen: Boolean(isAdmin && rosterClub),
+    containerRef: rosterModalRef,
+    onClose: () => setRosterClub(null),
+    disableEscape: savingOrg,
+  });
 
   const openCreateModal = () => {
     setEditorMode('create');
@@ -144,7 +162,7 @@ export function ClubManagementView({
       } catch (err) {
         onShowToast(
           'error',
-          err instanceof Error ? err.message : 'Could not load club organizers.'
+          toUserFriendlyErrorMessage(err, 'Could not load club organizers.')
         );
       } finally {
         setMembersLoading(false);
@@ -189,7 +207,7 @@ export function ClubManagementView({
         setEditorMode(null);
         setEditingClub(null);
       } catch (err) {
-        setFormSubmitError(err instanceof Error ? err.message : 'Could not save club.');
+        setFormSubmitError(toUserFriendlyErrorMessage(err, 'Could not save club details.'));
       } finally {
         setIsSubmitting(false);
       }
@@ -221,7 +239,7 @@ export function ClubManagementView({
         setEditorMode(null);
         setEditingClub(null);
       } catch (err) {
-        setFormSubmitError(err instanceof Error ? err.message : 'Could not update club.');
+        setFormSubmitError(toUserFriendlyErrorMessage(err, 'Could not update club profile.'));
       } finally {
         setIsSubmitting(false);
       }
@@ -240,7 +258,7 @@ export function ClubManagementView({
           : `"${club.name}" reactivated.`
       );
     } catch (err) {
-      onShowToast('error', err instanceof Error ? err.message : 'Could not update club status.');
+      onShowToast('error', toUserFriendlyErrorMessage(err, 'Could not update club status.'));
     } finally {
       setBusyClubId(null);
     }
@@ -271,7 +289,7 @@ export function ClubManagementView({
       setOrgDisplayName('');
       await loadRoster(rosterClub);
     } catch (err) {
-      onShowToast('error', err instanceof Error ? err.message : 'Could not assign organizer.');
+      onShowToast('error', toUserFriendlyErrorMessage(err, 'Could not assign organizer.'));
     } finally {
       setSavingOrg(false);
     }
@@ -290,7 +308,7 @@ export function ClubManagementView({
       onShowToast('success', `Revoked club access for ${targetUid}.`);
       await loadRoster(rosterClub);
     } catch (err) {
-      onShowToast('error', err instanceof Error ? err.message : 'Could not revoke organizer.');
+      onShowToast('error', toUserFriendlyErrorMessage(err, 'Could not revoke organizer.'));
     } finally {
       setSavingOrg(false);
     }
@@ -471,7 +489,9 @@ export function ClubManagementView({
           onClick={() => !isSubmitting && setEditorMode(null)}
         >
           <div
-            className="flex flex-col w-full md:max-w-2xl max-h-[92dvh] md:max-h-[88vh] overflow-hidden rounded-t-2xl md:rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl"
+            ref={editorModalRef}
+            tabIndex={-1}
+            className="flex flex-col w-full md:max-w-2xl max-h-[92dvh] md:max-h-[88vh] overflow-hidden rounded-t-2xl md:rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-4 bg-white shrink-0">
@@ -821,7 +841,9 @@ export function ClubManagementView({
           onClick={() => !savingOrg && setRosterClub(null)}
         >
           <div
-            className="flex flex-col w-full md:max-w-xl max-h-[90dvh] overflow-hidden rounded-t-2xl md:rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl"
+            ref={rosterModalRef}
+            tabIndex={-1}
+            className="flex flex-col w-full md:max-w-xl max-h-[90dvh] overflow-hidden rounded-t-2xl md:rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-4">

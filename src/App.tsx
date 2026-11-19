@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { AlertCircle, ArrowLeft, ArrowRight, CalendarOff, CheckCircle2, Lock, Users, X } from 'lucide-react';
 import { fetchClubById } from './services/clubService';
+import {
+  fetchUserOnboardingProgress,
+  getLocalStudentTourDismissed,
+  saveUserOnboardingProgress,
+  setLocalStudentTourDismissed,
+} from './services/onboardingService';
 import type { Club } from './types/club';
 import type { AppView, EventCategory, SchoolEvent } from './types/event';
 import type { AppNotification } from './types/notification';
+import { DEFAULT_USER_ONBOARDING_PROGRESS, type UserOnboardingProgress } from './types/school';
 import { canManageClub, countUpcomingClubEvents } from './utils/clubValidation';
 import { filterEvents, groupEventsByTimeframe } from './utils/events';
 import {
@@ -15,11 +22,10 @@ import {
 } from './utils/personalization';
 import { useAuth } from './hooks/useAuth';
 import { useClubs } from './hooks/useClubs';
+import { useEventOperations } from './hooks/useEventOperations';
 import { useEvents } from './hooks/useEvents';
 import { useMembership } from './hooks/useMembership';
 import { useNotifications } from './hooks/useNotifications';
-import { ClubDiscoveryPage } from './components/clubs/ClubDiscoveryPage';
-import { ClubProfilePage } from './components/clubs/ClubProfilePage';
 import {
   DiscoveryToolbar,
   type CategoryFilter,
@@ -33,16 +39,62 @@ import { Footer } from './components/Footer';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { MobileBottomNav } from './components/MobileBottomNav';
-import { MyEventsView } from './components/MyEventsView';
-import { NotificationCenterView } from './components/notifications/NotificationCenterView';
-import { NotificationPreferencesView } from './components/notifications/NotificationPreferencesView';
-import {
-  OrganizerDashboard,
-  type OrganizerStudioTab,
-} from './components/organizer/OrganizerDashboard';
+import { FeedbackModal } from './components/feedback/FeedbackModal';
+import { StudentOnboardingModal } from './components/onboarding/StudentOnboardingModal';
 import { PersonalizedDiscoverSections } from './components/personalization/PersonalizedDiscoverSections';
-import { ProfileView } from './components/ProfileView';
 import { SignInPromptModal } from './components/SignInPromptModal';
+import type { OrganizerStudioTab } from './components/organizer/OrganizerDashboard';
+
+// Code-split secondary & privileged views so initial student landing bundle stays lean
+const OrganizerDashboard = lazy(() =>
+  import('./components/organizer/OrganizerDashboard').then((m) => ({
+    default: m.OrganizerDashboard,
+  }))
+);
+const ClubDiscoveryPage = lazy(() =>
+  import('./components/clubs/ClubDiscoveryPage').then((m) => ({
+    default: m.ClubDiscoveryPage,
+  }))
+);
+const ClubProfilePage = lazy(() =>
+  import('./components/clubs/ClubProfilePage').then((m) => ({
+    default: m.ClubProfilePage,
+  }))
+);
+const MyEventsView = lazy(() =>
+  import('./components/MyEventsView').then((m) => ({ default: m.MyEventsView }))
+);
+const NotificationCenterView = lazy(() =>
+  import('./components/notifications/NotificationCenterView').then((m) => ({
+    default: m.NotificationCenterView,
+  }))
+);
+const NotificationPreferencesView = lazy(() =>
+  import('./components/notifications/NotificationPreferencesView').then((m) => ({
+    default: m.NotificationPreferencesView,
+  }))
+);
+const ProfileView = lazy(() =>
+  import('./components/ProfileView').then((m) => ({ default: m.ProfileView }))
+);
+const ProductLandingPage = lazy(() =>
+  import('./components/landing/ProductLandingPage').then((m) => ({
+    default: m.ProductLandingPage,
+  }))
+);
+
+function ViewLoadingFallback({ label = 'Loading view...' }: { label?: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mx-auto max-w-3xl rounded-2xl border border-[#E5E7EB] bg-white p-8 text-center shadow-xs"
+    >
+      <div className="mx-auto h-6 w-40 animate-pulse rounded-lg bg-[#E5E7EB]/80" />
+      <p className="mt-3 text-xs font-medium text-[#737373]">{label}</p>
+    </div>
+  );
+}
 
 function OnePlaceFeed() {
   const { user, authLoading, isSigningIn, authError, setAuthError, signIn, logOut } = useAuth();
@@ -99,9 +151,33 @@ function OnePlaceFeed() {
     onShowToast: showToast,
   });
 
+  const {
+    announcementsByEventId,
+    getLifecycleState,
+    registerForEvent,
+    cancelRegistration,
+    isEventActionBusy,
+  } = useEventOperations({
+    user,
+    authLoading,
+    events,
+    membership,
+    capabilities,
+    getEffectiveRsvp,
+    onShowToast: showToast,
+  });
+
   const isEventGoingForFeed = useCallback(
-    (event: SchoolEvent) => getEffectiveRsvp(event).isGoing,
-    [getEffectiveRsvp]
+    (event: SchoolEvent) => {
+      const status = getLifecycleState(event).status;
+      return (
+        status === 'confirmed' ||
+        status === 'attended' ||
+        status === 'pending_approval' ||
+        status === 'waitlisted'
+      );
+    },
+    [getLifecycleState]
   );
 
   const starterFeedContext = useMemo(
@@ -111,8 +187,16 @@ function OnePlaceFeed() {
       clubs,
       followedById,
       isEventGoing: isEventGoingForFeed,
+      eventAnnouncementsByEventId: announcementsByEventId,
     }),
-    [capabilities.isActiveMember, clubs, events, followedById, isEventGoingForFeed]
+    [
+      announcementsByEventId,
+      capabilities.isActiveMember,
+      clubs,
+      events,
+      followedById,
+      isEventGoingForFeed,
+    ]
   );
 
   const {
@@ -156,15 +240,43 @@ function OnePlaceFeed() {
   const [fetchedFallbackClub, setFetchedFallbackClub] = useState<Club | null>(null);
   const [isLoadingSelectedClub, setIsLoadingSelectedClub] = useState(false);
 
-  const [organizerInitialTab, setOrganizerInitialTab] = useState<OrganizerStudioTab>('events');
+  const [organizerInitialTab, setOrganizerInitialTab] = useState<OrganizerStudioTab>('overview');
   const [promptEvent, setPromptEvent] = useState<SchoolEvent | null>(null);
   const [promptClub, setPromptClub] = useState<Club | null>(null);
   const [isSignInModalOpen, setIsSignInModalOpen] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [isStudentTourOpen, setIsStudentTourOpen] = useState(false);
+  const [tourBannerDismissed, setTourBannerDismissed] = useState<boolean>(() =>
+    getLocalStudentTourDismissed(schoolId)
+  );
+  const [userOnboarding, setUserOnboarding] = useState<UserOnboardingProgress | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const feedSectionRef = useRef<HTMLDivElement | null>(null);
 
-  // Support deep links from background push notifications (?view=event&id=... | club | notifications)
+  useEffect(() => {
+    setTourBannerDismissed(getLocalStudentTourDismissed(schoolId));
+  }, [schoolId]);
+
+  useEffect(() => {
+    if (!user) {
+      setUserOnboarding(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchUserOnboardingProgress(user.uid, schoolId).then((loaded) => {
+      if (cancelled) return;
+      setUserOnboarding(loaded);
+      if (loaded.studentCompleted || loaded.studentDismissed) {
+        setTourBannerDismissed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [schoolId, user]);
+
+  // Support deep links from background push notifications & landing links (?view=event&id=... | club | notifications | about)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view');
@@ -178,8 +290,30 @@ function OnePlaceFeed() {
       setActiveView('notifications');
     } else if (viewParam === 'notification-preferences') {
       setActiveView('notification-preferences');
+    } else if (viewParam === 'about') {
+      setActiveView('about');
     }
   }, []);
+
+  const persistStudentTourState = useCallback(
+    (patch: { studentCompleted?: boolean; studentDismissed?: boolean }) => {
+      setLocalStudentTourDismissed(schoolId, true);
+      setTourBannerDismissed(true);
+      if (!user || !user.emailVerified) return;
+      const base = userOnboarding ?? DEFAULT_USER_ONBOARDING_PROGRESS(user.uid, schoolId);
+      const next: UserOnboardingProgress = {
+        ...base,
+        ...patch,
+        uid: user.uid,
+        schoolId,
+      };
+      setUserOnboarding(next);
+      void saveUserOnboardingProgress(next).catch(() => {
+        // Non-blocking fallback; local dismissal already recorded
+      });
+    },
+    [schoolId, user, userOnboarding]
+  );
 
   const handleConfirmSignIn = async () => {
     const ok = await signIn();
@@ -205,7 +339,24 @@ function OnePlaceFeed() {
       setIsSignInModalOpen(true);
       return;
     }
-    toggleRsvp(event);
+
+    const lifecycle = getLifecycleState(event);
+    if (
+      lifecycle.status === 'confirmed' ||
+      lifecycle.status === 'pending_approval' ||
+      lifecycle.status === 'waitlisted'
+    ) {
+      if (lifecycle.source === 'legacy_rsvp') {
+        toggleRsvp(event);
+      } else {
+        void cancelRegistration(event);
+      }
+      return;
+    }
+
+    if (lifecycle.status === 'not_registered' || lifecycle.status === 'cancelled') {
+      void registerForEvent(event);
+    }
   };
 
   const handleFollowClubClick = (club: Club) => {
@@ -361,17 +512,26 @@ function OnePlaceFeed() {
 
   const activeRsvpCount = useMemo(() => {
     if (!user) return 0;
-    return events.reduce((acc, event) => (getEffectiveRsvp(event).isGoing ? acc + 1 : acc), 0);
-  }, [events, getEffectiveRsvp, user]);
+    return events.reduce((acc, event) => {
+      const st = getLifecycleState(event).status;
+      return st === 'confirmed' ||
+        st === 'attended' ||
+        st === 'pending_approval' ||
+        st === 'waitlisted'
+        ? acc + 1
+        : acc;
+    }, 0);
+  }, [events, getLifecycleState, user]);
 
   const rsvpedEventIds = useMemo(() => {
     const set = new Set<string>();
     if (!user) return set;
     for (const evt of events) {
-      if (getEffectiveRsvp(evt).isGoing) set.add(evt.id);
+      const st = getLifecycleState(evt).status;
+      if (st === 'confirmed' || st === 'attended') set.add(evt.id);
     }
     return set;
-  }, [events, getEffectiveRsvp, user]);
+  }, [events, getLifecycleState, user]);
 
   const followedClubCategories = useMemo(() => {
     const set = new Set<EventCategory>();
@@ -451,7 +611,7 @@ function OnePlaceFeed() {
       setClubFilterId(null);
     }
     if (view === 'organizer') {
-      setOrganizerInitialTab('events');
+      setOrganizerInitialTab('overview');
     }
     setActiveView(view);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -465,7 +625,8 @@ function OnePlaceFeed() {
       activeView === 'clubs' ||
       activeView === 'club-profile' ||
       activeView === 'notifications' ||
-      activeView === 'notification-preferences'
+      activeView === 'notification-preferences' ||
+      activeView === 'about'
     ) {
       setClubFilterId(null);
       setActiveView('explore');
@@ -500,8 +661,18 @@ function OnePlaceFeed() {
   const showSkeleton = isLoading || isRefreshing;
   let cardCounter = featuredEvent ? 1 : 0;
 
+  const isSuspendedMember = Boolean(user && membership?.status === 'suspended');
+  const isResolvingIdentity = authLoading || (Boolean(user) && membershipLoading);
+
   return (
     <div id="top" className="min-h-screen flex flex-col bg-[#F8F9FA] text-[#171717]">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-xl focus:bg-[#171717] focus:px-4 focus:py-2.5 focus:text-xs focus:font-semibold focus:text-white focus:shadow-lg focus:outline-2 focus:outline-offset-2 focus:outline-[#E85D04]"
+      >
+        Skip to main content
+      </a>
+
       <Header
         activeView={activeView}
         onNavigate={handleNavigate}
@@ -520,7 +691,21 @@ function OnePlaceFeed() {
         onSignOut={logOut}
       />
 
-      <main className="flex-1 w-full mx-auto max-w-6xl px-4 pt-6 pb-24 sm:px-6 md:pt-8 md:pb-10">
+      {isSuspendedMember && (
+        <div
+          role="alert"
+          className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-center text-xs sm:text-sm font-medium text-red-800"
+        >
+          Your school membership is currently suspended. Public events remain viewable, while RSVPs, club follows, and organizer tools are restricted. Contact your school administrator for help.
+        </div>
+      )}
+
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="flex-1 w-full mx-auto max-w-6xl px-4 pt-6 pb-24 sm:px-6 md:pt-8 md:pb-10 focus:outline-none"
+      >
+        <Suspense fallback={<ViewLoadingFallback />}>
         <AnimatePresence mode="wait">
           {activeView === 'organizer' ? (
             <motion.div
@@ -530,13 +715,16 @@ function OnePlaceFeed() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              {user && membership && capabilities.canAccessOrganizer ? (
+              {isResolvingIdentity ? (
+                <ViewLoadingFallback label="Verifying organizer permissions..." />
+              ) : user && membership && capabilities.canAccessOrganizer ? (
                 <OrganizerDashboard
                   user={user}
                   membership={membership}
                   capabilities={capabilities}
                   schoolConfig={schoolConfig}
                   managedEvents={managedEvents}
+                  discoverEvents={events}
                   allManagedClubs={allManagedClubs}
                   allDiscoverClubs={clubs}
                   managedClubIds={managedClubIds}
@@ -544,6 +732,7 @@ function OnePlaceFeed() {
                   onSelectEvent={(evt) => setSelectedEventId(evt.id)}
                   onViewClubProfile={handleSelectClub}
                   onViewPublishedFeed={() => handleNavigate('discover')}
+                  onOpenNotificationPreferences={() => handleNavigate('notification-preferences')}
                   onSchoolConfigUpdated={refreshMembership}
                   onShowToast={showToast}
                 />
@@ -677,16 +866,23 @@ function OnePlaceFeed() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              <MyEventsView
-                user={user}
-                events={events}
-                getEffectiveRsvp={getEffectiveRsvp}
-                onRsvpClick={handleRsvpClick}
-                onSelectEvent={(evt) => setSelectedEventId(evt.id)}
-                onSelectClubById={(cid) => void handleSelectClubById(cid)}
-                onSignIn={handleOpenSignIn}
-                onExplore={handleExploreCta}
-              />
+              {authLoading ? (
+                <ViewLoadingFallback label="Loading your event schedule..." />
+              ) : (
+                <MyEventsView
+                  user={user}
+                  events={events}
+                  getEffectiveRsvp={getEffectiveRsvp}
+                  getLifecycleState={getLifecycleState}
+                  announcementsByEventId={announcementsByEventId}
+                  isEventActionBusy={isEventActionBusy}
+                  onRsvpClick={handleRsvpClick}
+                  onSelectEvent={(evt) => setSelectedEventId(evt.id)}
+                  onSelectClubById={(cid) => void handleSelectClubById(cid)}
+                  onSignIn={handleOpenSignIn}
+                  onExplore={handleExploreCta}
+                />
+              )}
             </motion.div>
           ) : activeView === 'notifications' ? (
             <motion.div
@@ -696,20 +892,24 @@ function OnePlaceFeed() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              <NotificationCenterView
-                isSignedIn={Boolean(user)}
-                notifications={notifications}
-                unreadCount={unreadCount}
-                loading={notificationsLoading}
-                error={notificationsError}
-                hasMore={hasMoreNotifications}
-                onLoadMore={loadMoreNotifications}
-                onSelectNotification={handleSelectNotification}
-                onMarkAsRead={(id) => void markAsRead(id)}
-                onMarkAllRead={() => void markAllRead()}
-                onOpenPreferences={() => handleNavigate('notification-preferences')}
-                onSignIn={handleOpenSignIn}
-              />
+              {authLoading ? (
+                <ViewLoadingFallback label="Loading notifications..." />
+              ) : (
+                <NotificationCenterView
+                  isSignedIn={Boolean(user)}
+                  notifications={notifications}
+                  unreadCount={unreadCount}
+                  loading={notificationsLoading}
+                  error={notificationsError}
+                  hasMore={hasMoreNotifications}
+                  onLoadMore={loadMoreNotifications}
+                  onSelectNotification={handleSelectNotification}
+                  onMarkAsRead={(id) => void markAsRead(id)}
+                  onMarkAllRead={() => void markAllRead()}
+                  onOpenPreferences={() => handleNavigate('notification-preferences')}
+                  onSignIn={handleOpenSignIn}
+                />
+              )}
             </motion.div>
           ) : activeView === 'notification-preferences' ? (
             <motion.div
@@ -719,23 +919,27 @@ function OnePlaceFeed() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              <NotificationPreferencesView
-                isSignedIn={Boolean(user)}
-                preferences={preferences}
-                loading={preferencesLoading}
-                saving={savingPreferences}
-                pushPermission={pushPermission}
-                pushBusy={pushBusy}
-                pushStatusNote={pushStatusNote}
-                vapidConfigured={vapidConfigured}
-                onBack={() => handleNavigate('notifications')}
-                onSave={savePreferences}
-                onEnableAll={enableAllPreferences}
-                onDisableAll={disableAllPreferences}
-                onEnablePush={enablePushNotifications}
-                onDisablePush={disablePushNotifications}
-                onSignIn={handleOpenSignIn}
-              />
+              {authLoading ? (
+                <ViewLoadingFallback label="Loading notification preferences..." />
+              ) : (
+                <NotificationPreferencesView
+                  isSignedIn={Boolean(user)}
+                  preferences={preferences}
+                  loading={preferencesLoading}
+                  saving={savingPreferences}
+                  pushPermission={pushPermission}
+                  pushBusy={pushBusy}
+                  pushStatusNote={pushStatusNote}
+                  vapidConfigured={vapidConfigured}
+                  onBack={() => handleNavigate('notifications')}
+                  onSave={savePreferences}
+                  onEnableAll={enableAllPreferences}
+                  onDisableAll={disableAllPreferences}
+                  onEnablePush={enablePushNotifications}
+                  onDisablePush={disablePushNotifications}
+                  onSignIn={handleOpenSignIn}
+                />
+              )}
             </motion.div>
           ) : activeView === 'profile' ? (
             <motion.div
@@ -745,29 +949,53 @@ function OnePlaceFeed() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              <ProfileView
-                user={user}
+              {isResolvingIdentity ? (
+                <ViewLoadingFallback label="Loading student profile..." />
+              ) : (
+                <ProfileView
+                  user={user}
+                  events={events}
+                  rsvpCount={activeRsvpCount}
+                  followedClubsCount={followedClubIds.size}
+                  unreadNotificationCount={unreadCount}
+                  selectedInterests={preferences.interestCategories}
+                  onToggleInterest={(cat) => void toggleInterestCategory(cat)}
+                  membership={membership}
+                  capabilities={capabilities}
+                  getEffectiveRsvp={getEffectiveRsvp}
+                  onSignIn={handleOpenSignIn}
+                  onSignOut={logOut}
+                  onOpenMyEvents={() => handleNavigate('my-rsvps')}
+                  onOpenClubs={() => handleNavigate('clubs')}
+                  onOpenNotifications={() => handleNavigate('notifications')}
+                  onOpenNotificationPreferences={() => handleNavigate('notification-preferences')}
+                  onOpenOrganizer={() => {
+                    setOrganizerInitialTab('overview');
+                    handleNavigate('organizer');
+                  }}
+                  onOpenFeedback={() => setIsFeedbackModalOpen(true)}
+                  onOpenStudentTour={() => setIsStudentTourOpen(true)}
+                  onSelectEvent={(evt) => setSelectedEventId(evt.id)}
+                  onExplore={handleExploreCta}
+                />
+              )}
+            </motion.div>
+          ) : activeView === 'about' ? (
+            <motion.div
+              key="view-about"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <ProductLandingPage
+                schoolConfig={schoolConfig}
                 events={events}
-                rsvpCount={activeRsvpCount}
-                followedClubsCount={followedClubIds.size}
-                unreadNotificationCount={unreadCount}
-                selectedInterests={preferences.interestCategories}
-                onToggleInterest={(cat) => void toggleInterestCategory(cat)}
-                membership={membership}
-                capabilities={capabilities}
-                getEffectiveRsvp={getEffectiveRsvp}
-                onSignIn={handleOpenSignIn}
-                onSignOut={logOut}
-                onOpenMyEvents={() => handleNavigate('my-rsvps')}
-                onOpenClubs={() => handleNavigate('clubs')}
-                onOpenNotifications={() => handleNavigate('notifications')}
-                onOpenNotificationPreferences={() => handleNavigate('notification-preferences')}
-                onOpenOrganizer={() => {
-                  setOrganizerInitialTab('events');
-                  handleNavigate('organizer');
-                }}
+                clubs={clubs}
+                onNavigate={handleNavigate}
                 onSelectEvent={(evt) => setSelectedEventId(evt.id)}
-                onExplore={handleExploreCta}
+                onSelectClub={handleSelectClub}
+                onOpenFeedback={() => setIsFeedbackModalOpen(true)}
               />
             </motion.div>
           ) : (
@@ -783,6 +1011,7 @@ function OnePlaceFeed() {
               {activeView === 'discover' ? (
                 <HeroSection
                   events={events}
+                  schoolConfig={schoolConfig}
                   displayName={user?.displayName}
                   isSignedIn={Boolean(user)}
                   selectedInterests={preferences.interestCategories}
@@ -792,6 +1021,9 @@ function OnePlaceFeed() {
                   categoryFilter={categoryFilter}
                   onSelectCategoryShortcut={handleSelectCategoryShortcut}
                   onExploreCta={handleExploreCta}
+                  showTourBanner={!tourBannerDismissed}
+                  onOpenTour={() => setIsStudentTourOpen(true)}
+                  onDismissTourBanner={() => persistStudentTourState({ studentDismissed: true })}
                 />
               ) : (
                 <section className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-[#E5E7EB] pb-5">
@@ -926,6 +1158,8 @@ function OnePlaceFeed() {
                     rsvpCount={getEffectiveRsvp(featuredEvent).rsvpCount}
                     isGoing={getEffectiveRsvp(featuredEvent).isGoing}
                     isSignedIn={Boolean(user)}
+                    lifecycle={getLifecycleState(featuredEvent)}
+                    isBusy={isEventActionBusy(featuredEvent.id)}
                     onRsvpClick={handleRsvpClick}
                     onSelectEvent={(evt) => setSelectedEventId(evt.id)}
                     onSelectClubById={(cid) => void handleSelectClubById(cid)}
@@ -1037,6 +1271,8 @@ function OnePlaceFeed() {
                                   rsvpCount={rsvpCount}
                                   isGoing={isGoing}
                                   isSignedIn={Boolean(user)}
+                                  lifecycle={getLifecycleState(event)}
+                                  isBusy={isEventActionBusy(event.id)}
                                   onRsvpClick={handleRsvpClick}
                                   onSelectEvent={(evt) => setSelectedEventId(evt.id)}
                                   onSelectClubById={(cid) => void handleSelectClubById(cid)}
@@ -1078,14 +1314,17 @@ function OnePlaceFeed() {
             </motion.div>
           )}
         </AnimatePresence>
+        </Suspense>
       </main>
 
       <Footer
         onNavigate={handleNavigate}
+        onOpenFeedback={() => setIsFeedbackModalOpen(true)}
         totalEvents={events.length}
         totalClubs={clubs.length}
         canAccessOrganizer={capabilities.canAccessOrganizer}
         schoolName={schoolConfig.name}
+        schoolLocation={schoolConfig.location}
       />
 
       <MobileBottomNav
@@ -1130,8 +1369,14 @@ function OnePlaceFeed() {
         rsvpCount={selectedEvent ? getEffectiveRsvp(selectedEvent).rsvpCount : 0}
         isGoing={selectedEvent ? getEffectiveRsvp(selectedEvent).isGoing : false}
         isSignedIn={Boolean(user)}
+        userUid={user?.uid ?? null}
+        isVerifiedUser={Boolean(user?.emailVerified)}
+        isSuspendedMember={isSuspendedMember}
+        lifecycle={selectedEvent ? getLifecycleState(selectedEvent) : undefined}
+        isBusy={selectedEvent ? isEventActionBusy(selectedEvent.id) : false}
         onRsvpClick={handleRsvpClick}
         onSelectClubById={(cid) => void handleSelectClubById(cid)}
+        onShowToast={showToast}
         onClose={() => setSelectedEventId(null)}
       />
 
@@ -1147,6 +1392,37 @@ function OnePlaceFeed() {
           setPromptEvent(null);
           setPromptClub(null);
         }}
+      />
+
+      <StudentOnboardingModal
+        isOpen={isStudentTourOpen}
+        schoolName={schoolConfig.name}
+        isSignedIn={Boolean(user)}
+        selectedInterests={preferences.interestCategories}
+        clubs={clubs}
+        events={events}
+        getEffectiveFollow={getEffectiveFollow}
+        onToggleInterest={(cat) => void toggleInterestCategory(cat)}
+        onFollowClub={handleFollowClubClick}
+        onSelectEvent={(evt) => setSelectedEventId(evt.id)}
+        onComplete={() => {
+          setIsStudentTourOpen(false);
+          persistStudentTourState({ studentCompleted: true, studentDismissed: true });
+        }}
+        onDismiss={() => {
+          setIsStudentTourOpen(false);
+          persistStudentTourState({ studentDismissed: true });
+        }}
+      />
+
+      <FeedbackModal
+        isOpen={isFeedbackModalOpen}
+        schoolId={schoolId}
+        schoolName={schoolConfig.name}
+        userUid={user?.uid ?? null}
+        onSignIn={handleOpenSignIn}
+        onClose={() => setIsFeedbackModalOpen(false)}
+        onSubmitted={() => showToast('success', 'Thank you—your feedback was sent to school admins.')}
       />
     </div>
   );
